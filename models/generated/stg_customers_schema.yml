@@ -1,0 +1,13 @@
+models:
+  - name: stg_customers
+    description: "Staging model for customers"
+    columns:
+      - name: customer_id
+        description: "Primary key for customer"
+        tests:
+          - not_null
+          - unique
+      - name: first_name
+        description: "Customer first name"
+      - name: last_name
+        description: "Customer last name"

@@ -1,0 +1,37 @@
+[
+  {
+    "table_name": "stg_customers",
+    "source_name": "jaffle_shop",
+    "source_table": "raw_customers",
+    "columns": [
+      {"name": "customer_id", "type": "int", "description": "Primary key for customer"},
+      {"name": "first_name", "type": "string", "description": "Customer first name"},
+      {"name": "last_name", "type": "string", "description": "Customer last name"}
+    ],
+    "transformations": "Select id as customer_id, and standardise first_name and last_name casing to uppercase."
+  },
+  {
+    "table_name": "stg_orders",
+    "source_name": "jaffle_shop",
+    "source_table": "raw_orders",
+    "columns": [
+      {"name": "order_id", "type": "int", "description": "Primary key for order"},
+      {"name": "customer_id", "type": "int", "description": "Foreign key to the customer"},
+      {"name": "order_date", "type": "date", "description": "Date the order was placed"},
+      {"name": "status", "type": "string", "description": "Order status (placed, shipped, completed, return_pending, returned)"}
+    ],
+    "transformations": "Select id as order_id, user_id as customer_id, order_date, and status. Apply tests to status to make sure they are one of the accepted values."
+  },
+  {
+    "table_name": "stg_payments",
+    "source_name": "jaffle_shop",
+    "source_table": "raw_payments",
+    "columns": [
+      {"name": "payment_id", "type": "int", "description": "Primary key for payment"},
+      {"name": "order_id", "type": "int", "description": "Foreign key to the order"},
+      {"name": "payment_method", "type": "string", "description": "Payment method (credit_card, coupon, bank_transfer, gift_card)"},
+      {"name": "amount", "type": "number", "description": "Payment amount in cents. Convert this to dollars."}
+    ],
+    "transformations": "Select id as payment_id, order_id, payment_method, and convert amount from cents to dollars (amount / 100). Please enforce bounds/accepted values tests on payment_method."
+  }
+]

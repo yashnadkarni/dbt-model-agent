@@ -1,0 +1,17 @@
+
+target/
+dbt_packages/
+dbt_internal_packages/
+fs_internal_packages/
+dbt_modules/
+logs/
+**/.DS_Store
+.user.yml
+.env
+venv/
+.venv/
+env/
+**/*.duckdb
+**/*.duckdb.wal
+__pycache__/
+jaffle-data/

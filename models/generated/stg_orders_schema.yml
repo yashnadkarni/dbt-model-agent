@@ -1,0 +1,23 @@
+models:
+  - name: stg_orders
+    description: "Staging model for orders"
+    columns:
+      - name: order_id
+        description: "Primary key for order"
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        description: "Foreign key to the customer"
+        tests:
+          - not_null
+      - name: order_date
+        description: "Date the order was placed"
+        tests:
+          - not_null
+      - name: status
+        description: "Order status (placed, shipped, completed, return_pending, returned)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['placed', 'shipped', 'completed', 'return_pending', 'returned']

@@ -1,0 +1,20 @@
+models:
+  - name: stg_payments
+    description: "Staging model for payments data."
+    columns:
+      - name: payment_id
+        description: "Primary key for payment"
+        tests:
+          - not_null
+          - unique
+      - name: order_id
+        description: "Foreign key to the order"
+        tests:
+          - not_null
+      - name: payment_method
+        description: "Payment method (credit_card, coupon, bank_transfer, gift_card)"
+        tests:
+          - accepted_values:
+              values: ['credit_card', 'coupon', 'bank_transfer', 'gift_card']
+      - name: amount
+        description: "Payment amount in cents. Convert this to dollars."
