@@ -15,7 +15,7 @@ Give the agent a JSON schema describing a table (columns, types, transformations
 ## Architecture
 
 ```
-┌─────────────┐     POST /generate_model     ┌──────────────┐
+┌─────────────┐     POST /generate_model      ┌───────────────┐
 │ test_api.py │ ──────────────────────────▶   │   FastAPI     │
 │  (client)   │                               │   (agent.py)  │
 └─────────────┘     ◀──────────────────────── │               │
@@ -37,7 +37,7 @@ Give the agent a JSON schema describing a table (columns, types, transformations
 ## Project Structure
 
 ```
-jaffle_shop_duckdb/
+dbt-model-agent/
 ├── agent.py               # FastAPI server + LangGraph agent + tools
 ├── test_api.py            # Demo client — fires requests from demo_schemas.json
 ├── demo_schemas.json      # 3 real-world schema definitions (customers, orders, payments)
@@ -171,3 +171,5 @@ llm = ChatAnthropic(model="claude-sonnet-4-20250514", temperature=0)
 - **Data Warehouse:** DuckDB
 - **dbt:** dbt-core + dbt-duckdb adapter
 - **SQL Linting:** sqlfluff
+- **Build:** on top of [jaffle_shop_duckdb](https://github.com/dbt-labs/jaffle_shop_duckdb) by dbt Labs (Apache 2.0).
+
