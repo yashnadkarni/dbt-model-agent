@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Talend Job: filter_active_customers
+  
+  Pipeline: tMysqlInput → tFilterRow → tMysqlOutput
+  Purpose:  Read all customers from raw_customers, keep only those
+            with status = 'active', and write to active_customers table.
+-->
+<xmi:XMI xmi:version="2.0"
+  xmlns:xmi="http://www.omg.org/XMI"
+  xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd">
+
+  <talendfile:ProcessItem>
+    <process defaultContext="Default">
+
+      <!-- ============================================================
+           CONTEXT PARAMETERS
+           These are like environment variables for the job.
+           In Talend, you define DB credentials, paths, etc. here.
+           ============================================================ -->
+      <context name="Default">
+        <contextParameter name="db_host" type="id_String" value="localhost"/>
+        <contextParameter name="db_port" type="id_String" value="3306"/>
+        <contextParameter name="db_name" type="id_String" value="jaffle_shop"/>
+        <contextParameter name="db_user" type="id_String" value="root"/>
+        <contextParameter name="db_password" type="id_Password" value=""/>
+      </context>
+
+      <!-- ============================================================
+           NODE 1: tMysqlInput_1 — SOURCE
+           
+           This is the input component. It reads from a MySQL table.
+           Key elementParameters:
+             - UNIQUE_NAME: Component's internal ID (e.g. "tMysqlInput_1")
+             - HOST, PORT, DBNAME: Connection details
+             - TABLE: The source table name
+             - QUERY: The SQL query to execute
+           
+           The <metadata> block defines the output schema — the columns
+           that flow out of this component into the next one.
+           ============================================================ -->
+      <node componentName="tMysqlInput" componentVersion="0.102"
+            offsetLabelX="0" offsetLabelY="0" posX="96" posY="160">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_1"/>
+        <elementParameter field="TEXT" name="HOST" value="context.db_host"/>
+        <elementParameter field="TEXT" name="PORT" value="context.db_port"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;jaffle_shop&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;raw_customers&quot;"/>
+        <elementParameter field="TEXT" name="SCHEMA_DB" value="&quot;public&quot;"/>
+        <elementParameter field="MEMO_SQL" name="QUERY"
+          value="&quot;SELECT id, first_name, last_name, email, status FROM raw_customers&quot;"/>
+        <metadata connector="FLOW" name="tMysqlInput_1">
+          <column comment="" key="true" name="id" nullable="false"
+                  pattern="" type="id_Integer"/>
+          <column comment="" key="false" name="first_name" nullable="true"
+                  length="100" pattern="" type="id_String"/>
+          <column comment="" key="false" name="last_name" nullable="true"
+                  length="100" pattern="" type="id_String"/>
+          <column comment="" key="false" name="email" nullable="true"
+                  length="255" pattern="" type="id_String"/>
+          <column comment="" key="false" name="status" nullable="true"
+                  length="50" pattern="" type="id_String"/>
+        </metadata>
+      </node>
+
+      <!-- ============================================================
+           NODE 2: tFilterRow_1 — TRANSFORMATION (FILTER)
+           
+           This component filters rows based on conditions.
+           Key elementParameters:
+             - CONDITIONS: A table of filter rules. Each entry has:
+                 INPUT_COLUMN: which column to check
+                 OPERATOR:     ==, !=, >, <, >=, <=, matches, contains
+                 RVALUE:       the value to compare against
+                 FUNCTION:     optional function (UPPER, LOWER, TRIM, etc.)
+             - LOGICAL_OP: AND / OR between multiple conditions
+           
+           Rows that pass the filter go to the FLOW output.
+           Rows that fail go to the REJECT output (if connected).
+           ============================================================ -->
+      <node componentName="tFilterRow" componentVersion="0.102"
+            offsetLabelX="0" offsetLabelY="0" posX="320" posY="160">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tFilterRow_1"/>
+        <elementParameter field="TEXT" name="LOGICAL_OP" value="&amp;&amp;"/>
+        <elementParameter field="TABLE" name="CONDITIONS">
+          <elementValue elementRef="INPUT_COLUMN" value="status"/>
+          <elementValue elementRef="FUNCTION" value=""/>
+          <elementValue elementRef="OPERATOR" value="=="/>
+          <elementValue elementRef="RVALUE" value="&quot;active&quot;"/>
+        </elementParameter>
+        <metadata connector="FLOW" name="tFilterRow_1">
+          <column comment="" key="true" name="id" nullable="false" type="id_Integer"/>
+          <column comment="" key="false" name="first_name" nullable="true"
+                  length="100" type="id_String"/>
+          <column comment="" key="false" name="last_name" nullable="true"
+                  length="100" type="id_String"/>
+          <column comment="" key="false" name="email" nullable="true"
+                  length="255" type="id_String"/>
+          <column comment="" key="false" name="status" nullable="true"
+                  length="50" type="id_String"/>
+        </metadata>
+      </node>
+
+      <!-- ============================================================
+           NODE 3: tMysqlOutput_1 — TARGET
+           
+           This is the output component. It writes to a MySQL table.
+           Key elementParameters:
+             - TABLE: Target table name
+             - ACTION_ON_TABLE: CREATE, DROP_CREATE, NONE, etc.
+             - ACTION_ON_DATA: INSERT, UPDATE, INSERT_OR_UPDATE, DELETE
+           ============================================================ -->
+      <node componentName="tMysqlOutput" componentVersion="0.102"
+            offsetLabelX="0" offsetLabelY="0" posX="544" posY="160">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlOutput_1"/>
+        <elementParameter field="TEXT" name="HOST" value="context.db_host"/>
+        <elementParameter field="TEXT" name="PORT" value="context.db_port"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;jaffle_shop&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;active_customers&quot;"/>
+        <elementParameter field="TEXT" name="SCHEMA_DB" value="&quot;public&quot;"/>
+        <elementParameter field="CLOSED_LIST" name="ACTION_ON_TABLE" value="DROP_CREATE"/>
+        <elementParameter field="CLOSED_LIST" name="ACTION_ON_DATA" value="INSERT"/>
+        <metadata connector="FLOW" name="tMysqlOutput_1">
+          <column comment="" key="true" name="id" nullable="false" type="id_Integer"/>
+          <column comment="" key="false" name="first_name" nullable="true"
+                  length="100" type="id_String"/>
+          <column comment="" key="false" name="last_name" nullable="true"
+                  length="100" type="id_String"/>
+          <column comment="" key="false" name="email" nullable="true"
+                  length="255" type="id_String"/>
+          <column comment="" key="false" name="status" nullable="true"
+                  length="50" type="id_String"/>
+        </metadata>
+      </node>
+
+      <!-- ============================================================
+           CONNECTIONS
+           
+           These define the data flow between components.
+           Each connection has:
+             - source: The component ID where data comes from
+             - target: The component ID where data goes to
+             - connectorName: FLOW (normal data) or REJECT (filtered-out rows)
+             - label: The row name shown in the Talend GUI (row1, row2, etc.)
+           ============================================================ -->
+      <connection connectorName="FLOW" label="row1" lineStyle="0"
+                  metaname="tMysqlInput_1" offsetLabelX="0" offsetLabelY="0"
+                  source="tMysqlInput_1" target="tFilterRow_1"/>
+      <connection connectorName="FLOW" label="row2" lineStyle="0"
+                  metaname="tFilterRow_1" offsetLabelX="0" offsetLabelY="0"
+                  source="tFilterRow_1" target="tMysqlOutput_1"/>
+
+    </process>
+  </talendfile:ProcessItem>
+</xmi:XMI>

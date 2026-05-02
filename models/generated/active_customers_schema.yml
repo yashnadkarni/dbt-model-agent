@@ -1,0 +1,17 @@
+models:
+- name: active_customers
+  description: 'dbt model converted from Talend job: filter_active_customers.item'
+  columns:
+  - name: id
+    description: Column id
+    tests:
+    - not_null
+    - unique
+  - name: first_name
+    description: Column first_name
+  - name: last_name
+    description: Column last_name
+  - name: email
+    description: Column email
+  - name: status
+    description: Column status

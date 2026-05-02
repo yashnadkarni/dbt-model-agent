@@ -1,0 +1,10 @@
+models:
+- name: payment_summary
+  description: 'dbt model converted from Talend job: aggregate_payments.item'
+  columns:
+  - name: payment_method
+    description: Column payment_method
+  - name: total_amount
+    description: Column total_amount
+  - name: transaction_count
+    description: Column transaction_count

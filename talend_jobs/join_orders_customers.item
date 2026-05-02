@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Talend Job: join_orders_customers
+  
+  Pipeline: tMysqlInput_1 (orders) ─┐
+                                     ├→ tMap_1 (LEFT JOIN) → tMysqlOutput_1
+            tMysqlInput_2 (customers)┘
+  
+  Purpose: Join raw_orders with raw_customers on customer_id = id,
+           producing an enriched order_details table with customer names.
+           
+  The tMap is the MOST IMPORTANT Talend component to understand.
+  It handles: joins, column mappings, expressions, and filtering — all in one.
+-->
+<xmi:XMI xmi:version="2.0"
+  xmlns:xmi="http://www.omg.org/XMI"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd"
+  xmlns:TalendMapper="http://www.talend.org/mapper">
+
+  <talendfile:ProcessItem>
+    <process defaultContext="Default">
+
+      <context name="Default">
+        <contextParameter name="db_host" type="id_String" value="localhost"/>
+        <contextParameter name="db_port" type="id_String" value="3306"/>
+        <contextParameter name="db_name" type="id_String" value="jaffle_shop"/>
+        <contextParameter name="db_user" type="id_String" value="root"/>
+        <contextParameter name="db_password" type="id_Password" value=""/>
+      </context>
+
+      <!-- ============================================================
+           NODE 1: tMysqlInput_1 — SOURCE (orders)
+           ============================================================ -->
+      <node componentName="tMysqlInput" componentVersion="0.102"
+            posX="64" posY="96">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_1"/>
+        <elementParameter field="TEXT" name="HOST" value="context.db_host"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;jaffle_shop&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;raw_orders&quot;"/>
+        <elementParameter field="MEMO_SQL" name="QUERY"
+          value="&quot;SELECT id, user_id, order_date, status, amount FROM raw_orders&quot;"/>
+        <metadata connector="FLOW" name="tMysqlInput_1">
+          <column name="id" key="true" nullable="false" type="id_Integer"/>
+          <column name="user_id" nullable="false" type="id_Integer"/>
+          <column name="order_date" nullable="true" type="id_Date" pattern="yyyy-MM-dd"/>
+          <column name="status" nullable="true" length="50" type="id_String"/>
+          <column name="amount" nullable="true" type="id_Integer"/>
+        </metadata>
+      </node>
+
+      <!-- ============================================================
+           NODE 2: tMysqlInput_2 — SOURCE (customers)
+           This is the lookup/dimension table for our join.
+           ============================================================ -->
+      <node componentName="tMysqlInput" componentVersion="0.102"
+            posX="64" posY="256">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_2"/>
+        <elementParameter field="TEXT" name="HOST" value="context.db_host"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;jaffle_shop&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;raw_customers&quot;"/>
+        <elementParameter field="MEMO_SQL" name="QUERY"
+          value="&quot;SELECT id, first_name, last_name FROM raw_customers&quot;"/>
+        <metadata connector="FLOW" name="tMysqlInput_2">
+          <column name="id" key="true" nullable="false" type="id_Integer"/>
+          <column name="first_name" nullable="true" length="100" type="id_String"/>
+          <column name="last_name" nullable="true" length="100" type="id_String"/>
+        </metadata>
+      </node>
+
+      <!-- ============================================================
+           NODE 3: tMap_1 — TRANSFORMATION (JOIN + COLUMN MAPPING)
+           
+           *** THIS IS THE MOST COMPLEX AND IMPORTANT TALEND COMPONENT ***
+           
+           The tMap's inner structure lives inside <nodeData> and has:
+           
+           1. <inputTables> — one per incoming flow
+              - name: matches the connection's label (row1, row2)
+              - matchingMode: ALL_ROWS, FIRST_MATCH, ALL_MATCHES
+                (determines LEFT JOIN vs INNER JOIN behavior)
+              - innerJoin: "false" = LEFT JOIN, "true" = INNER JOIN
+              - <mapperTableEntries>: defines join keys using "expression"
+                pointing to the OTHER table's column
+           
+           2. <outputTables> — defines what columns the output produces
+              - <mapperTableEntries>:
+                  name: output column name
+                  expression: where the value comes from (e.g. "row1.id")
+                  type: data type
+                  
+              Expressions can be complex:
+                - Simple mapping: "row1.id"
+                - Concatenation: "row1.first_name + \" \" + row1.last_name"
+                - Transformation: "StringHandling.UPCASE(row1.first_name)"
+                - Math: "row1.amount / 100.0"
+           
+           3. <varTables> — intermediate variables (optional)
+              - Used for complex multi-step transformations
+           ============================================================ -->
+      <node componentName="tMap" componentVersion="0.102"
+            posX="320" posY="160">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMap_1"/>
+        <nodeData xsi:type="TalendMapper:MapperData">
+
+          <!-- Input table 1: Orders (main flow) -->
+          <inputTables name="row1" sizeState="0" matchingMode="ALL_ROWS">
+            <mapperTableEntries name="id" expression="" type="id_Integer"/>
+            <mapperTableEntries name="user_id" expression="" type="id_Integer"/>
+            <mapperTableEntries name="order_date" expression="" type="id_Date"/>
+            <mapperTableEntries name="status" expression="" type="id_String"/>
+            <mapperTableEntries name="amount" expression="" type="id_Integer"/>
+          </inputTables>
+
+          <!-- Input table 2: Customers (lookup)
+               - innerJoin="false" means LEFT JOIN
+               - The expression on "id" column defines the JOIN KEY:
+                 row2.id is joined WHERE row2.id = row1.user_id -->
+          <inputTables name="row2" sizeState="0" matchingMode="FIRST_MATCH"
+                       innerJoin="false" persistent="false"
+                       lookupMode="LOAD_ONCE">
+            <mapperTableEntries name="id" expression="row1.user_id" type="id_Integer"/>
+            <mapperTableEntries name="first_name" expression="" type="id_String"/>
+            <mapperTableEntries name="last_name" expression="" type="id_String"/>
+          </inputTables>
+
+          <!-- Output table: The final enriched result -->
+          <outputTables name="out1" sizeState="0">
+            <mapperTableEntries name="order_id" expression="row1.id" type="id_Integer"/>
+            <mapperTableEntries name="customer_id" expression="row1.user_id" type="id_Integer"/>
+            <mapperTableEntries name="customer_name"
+              expression="row2.first_name + &quot; &quot; + row2.last_name"
+              type="id_String"/>
+            <mapperTableEntries name="order_date" expression="row1.order_date" type="id_Date"/>
+            <mapperTableEntries name="status" expression="row1.status" type="id_String"/>
+            <mapperTableEntries name="amount_dollars"
+              expression="row1.amount / 100.0"
+              type="id_Double"/>
+          </outputTables>
+
+        </nodeData>
+      </node>
+
+      <!-- ============================================================
+           NODE 4: tMysqlOutput_1 — TARGET (order_details)
+           ============================================================ -->
+      <node componentName="tMysqlOutput" componentVersion="0.102"
+            posX="544" posY="160">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlOutput_1"/>
+        <elementParameter field="TEXT" name="HOST" value="context.db_host"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;jaffle_shop&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;order_details&quot;"/>
+        <elementParameter field="CLOSED_LIST" name="ACTION_ON_TABLE" value="DROP_CREATE"/>
+        <elementParameter field="CLOSED_LIST" name="ACTION_ON_DATA" value="INSERT"/>
+        <metadata connector="FLOW" name="tMysqlOutput_1">
+          <column name="order_id" key="true" nullable="false" type="id_Integer"/>
+          <column name="customer_id" nullable="false" type="id_Integer"/>
+          <column name="customer_name" nullable="true" length="200" type="id_String"/>
+          <column name="order_date" nullable="true" type="id_Date" pattern="yyyy-MM-dd"/>
+          <column name="status" nullable="true" length="50" type="id_String"/>
+          <column name="amount_dollars" nullable="true" type="id_Double"/>
+        </metadata>
+      </node>
+
+      <!-- ============================================================
+           CONNECTIONS
+           - row1: orders flow into tMap
+           - row2: customers flow into tMap (as LOOKUP)
+           - out1: tMap output flows to tMysqlOutput
+           ============================================================ -->
+      <connection connectorName="FLOW" label="row1" lineStyle="0"
+                  metaname="tMysqlInput_1"
+                  source="tMysqlInput_1" target="tMap_1"/>
+      <connection connectorName="LOOKUP" label="row2" lineStyle="0"
+                  metaname="tMysqlInput_2"
+                  source="tMysqlInput_2" target="tMap_1"/>
+      <connection connectorName="FLOW" label="out1" lineStyle="0"
+                  metaname="out1"
+                  source="tMap_1" target="tMysqlOutput_1"/>
+
+    </process>
+  </talendfile:ProcessItem>
+</xmi:XMI>

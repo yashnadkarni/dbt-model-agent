@@ -15,3 +15,4 @@ env/
 **/*.duckdb.wal
 __pycache__/
 jaffle-data/
+parsed_talend_jobs.json

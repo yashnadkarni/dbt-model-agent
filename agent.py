@@ -347,6 +347,68 @@ def validate_project():
 
 
 # ---------------------------------------------------------------------------
+# Talend Conversion Endpoint
+# ---------------------------------------------------------------------------
+
+class TalendConversionRequest(BaseModel):
+    """Request body for Talend-to-dbt conversion."""
+    job_file: str = Field(
+        ...,
+        description="Path to a Talend .item file (relative to project root or absolute).",
+    )
+
+
+@app.post("/convert_talend", summary="Convert a Talend job to a dbt model")
+def convert_talend(request: TalendConversionRequest):
+    """
+    Parses a Talend .item XML file, deterministically converts it to a dbt
+    model (SQL + schema YAML), writes the files, and validates with sqlfluff.
+    No LLM required — uses pattern-matched translation.
+    """
+    from dataclasses import asdict
+    from talend_parser import parse_talend_job
+    from talend_to_dbt import TalendToDbtConverter, write_dbt_files, validate_sql
+
+    # Resolve file path
+    job_path = request.job_file
+    if not os.path.isabs(job_path):
+        job_path = os.path.join(PROJECT_ROOT, job_path)
+
+    if not os.path.exists(job_path):
+        raise HTTPException(status_code=404, detail=f"File not found: {job_path}")
+
+    logger.info("━━━ Converting Talend job: %s ━━━", os.path.basename(job_path))
+
+    # Parse
+    parsed = parse_talend_job(job_path)
+    parsed_dict = asdict(parsed)
+
+    # Convert
+    converter = TalendToDbtConverter(parsed_dict)
+    result = converter.convert()
+
+    # Write files
+    paths = write_dbt_files(result)
+
+    # Validate
+    lint = validate_sql(paths["sql_path"])
+
+    logger.info("━━━ Conversion complete: %s (lint: %s) ━━━",
+                result.model_name, "PASS" if lint["passed"] else "FAIL")
+
+    return {
+        "status": "success",
+        "model_name": result.model_name,
+        "source_tables": result.source_tables,
+        "sql_content": result.sql_content,
+        "schema_yaml": result.schema_yaml,
+        "files": paths,
+        "lint": lint,
+        "warnings": result.warnings,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
