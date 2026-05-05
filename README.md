@@ -17,6 +17,13 @@ Drop in a Talend `.item` export and get a dbt model — **no LLM required**:
 - Generates CTE-based dbt SQL with `{{ source() }}` macros
 - Passes `sqlfluff lint` and `dbt compile` validation
 
+### Streamlit UI — Visual Demo
+A polished web interface for live demos:
+- Paste XML or upload `.item` files
+- One-click sample jobs for instant results
+- Side-by-side SQL + YAML output with pipeline visualization
+- Download generated dbt project as a zip file
+
 ---
 
 ## Before / After: Talend → dbt
@@ -239,6 +246,7 @@ JSON Schema ──▶  POST /generate_model   │   Talend XML ──▶  POST /
 
 ```
 dbt-model-agent/
+├── streamlit_app.py            # Streamlit UI — visual demo interface
 ├── agent.py                    # FastAPI server + LangGraph agent + tools
 ├── talend_parser.py            # Talend XML parser — extracts components and data flow
 ├── talend_to_dbt.py            # Deterministic Talend → dbt converter
@@ -249,6 +257,7 @@ dbt-model-agent/
 │   ├── filter_active_customers.item
 │   ├── join_orders_customers.item
 │   └── aggregate_payments.item
+├── .streamlit/config.toml      # Dark theme config
 ├── models/
 │   ├── generated/              # All agent/converter output lands here
 │   │   ├── active_customers.sql
@@ -275,7 +284,7 @@ dbt-model-agent/
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install dbt-core dbt-duckdb sqlfluff fastapi uvicorn langchain langchain-openai langgraph python-dotenv pyyaml
+pip install dbt-core dbt-duckdb sqlfluff fastapi uvicorn langchain langchain-openai langgraph python-dotenv pyyaml streamlit
 ```
 
 ### 2. Seed the Database
@@ -284,7 +293,15 @@ pip install dbt-core dbt-duckdb sqlfluff fastapi uvicorn langchain langchain-ope
 dbt seed
 ```
 
-### 3. Run Phase 2 (Talend → dbt) — No API Key Required
+### 3. Launch the Streamlit UI (Recommended for Demos)
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Open http://localhost:8501 → click any sample in the sidebar → see it convert instantly.
+
+### 4. Run Phase 2 (Talend → dbt) — CLI
 
 ```bash
 python3 test_talend_conversion.py
@@ -299,7 +316,7 @@ Expected output:
 🎉 All tests passed!
 ```
 
-### 4. Run Phase 1 (AI Agent) — Requires OpenAI Key
+### 5. Run Phase 1 (AI Agent) — Requires OpenAI Key
 
 ```bash
 cp .env.example .env
@@ -403,6 +420,7 @@ llm = ChatAnthropic(model="claude-sonnet-4-20250514", temperature=0)
 - **Agent Framework:** LangGraph + LangChain
 - **LLM:** OpenAI gpt-4o-mini (configurable, Phase 1 only)
 - **API Framework:** FastAPI + Uvicorn
+- **UI:** Streamlit
 - **Data Warehouse:** DuckDB
 - **dbt:** dbt-core + dbt-duckdb
 - **SQL Linting:** sqlfluff
