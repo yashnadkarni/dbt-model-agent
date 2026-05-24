@@ -1,0 +1,21 @@
+version: 2
+models:
+  - name: order_payment_summary
+    description: "Summary of orders and payments"
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        tests:
+          - not_null
+      - name: order_status
+        tests:
+          - not_null
+      - name: total_paid
+        tests:
+          - not_null
+      - name: num_payments
+        tests:
+          - not_null

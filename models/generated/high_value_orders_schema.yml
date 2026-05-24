@@ -1,0 +1,21 @@
+version: 2
+
+models:
+- name: high_value_orders
+  description: 'dbt model converted from Talend job: 04_multi_filter.item'
+  columns:
+  - name: id
+    description: Column id
+    tests:
+    - not_null
+    - unique
+  - name: user_id
+    description: Column user_id
+    tests:
+    - not_null
+  - name: order_date
+    description: Column order_date
+  - name: status
+    description: Column status
+  - name: amount
+    description: Column amount

@@ -1,3 +1,5 @@
+version: 2
+
 models:
 - name: payment_summary
   description: 'dbt model converted from Talend job: aggregate_payments.item'

@@ -1,427 +1,157 @@
-# dbt-model-agent
+# dbt Model Agent
 
-An AI-powered agent and deterministic converter that generates production-ready [dbt](https://www.getdbt.com/) models — from JSON schemas or Talend ETL jobs. Built with **LangGraph**, **FastAPI**, and **DuckDB**.
+Convert Talend ETL jobs into production-ready dbt models — instantly, deterministically, with optional LLM enhancement.
 
-## Features
+## What This Does
 
-### Phase 1 — AI Agent (JSON Schema → dbt)
-Give the agent a JSON schema and it autonomously generates a validated dbt model:
-- Generates `.sql` model + `.yml` schema with `not_null`, `unique`, `accepted_values` tests
-- Self-corrects using `sqlfluff lint` feedback in a retry loop
-- Merges source definitions across multiple requests
+Takes a Talend `.item` file (the XML export of a Talend job) and converts it into a complete set of dbt files:
 
-### Phase 2 — Talend Converter (Talend XML → dbt)
-Drop in a Talend `.item` export and get a dbt model — **no LLM required**:
-- Parses Talend XML (tMap, tFilterRow, tAggregateRow)
-- Translates Java expressions to SQL deterministically
-- Generates CTE-based dbt SQL with `{{ source() }}` macros
-- Passes `sqlfluff lint` and `dbt compile` validation
+| Talend Component | dbt Equivalent |
+|---|---|
+| `tMysqlInput` (source table) | `{{ source('name', 'table') }}` in SQL + `_sources.yml` |
+| `tFilterRow` (filter conditions) | `WHERE` clause |
+| `tMap` (column mapping + joins) | `SELECT` expressions + `JOIN` |
+| `tAggregateRow` (group by + sum/count) | `GROUP BY` + aggregate functions |
+| `tMysqlOutput` (target table) | The model name + `{{ config(materialized='table') }}` |
 
-### Streamlit UI — Visual Demo
-A polished web interface for live demos:
-- Paste XML or upload `.item` files
-- One-click sample jobs for instant results
-- Side-by-side SQL + YAML output with pipeline visualization
-- Download generated dbt project as a zip file
+For each Talend job, the converter generates **3 files**:
+- `model_name.sql` — The dbt SQL model (CTE-based, sqlfluff-validated)
+- `model_name_schema.yml` — Column definitions + data quality tests (not_null, unique)
+- `source_name_sources.yml` — Declares the raw input tables (shared across models)
 
----
+## Quick Start
 
-## Before / After: Talend → dbt
+### Prerequisites
+- Python 3.9+
+- (Optional) `OPENAI_API_KEY` for LLM mode
 
-### Example 1: Filter (`tFilterRow`)
+### 1. Setup
 
-<table>
-<tr><th>Talend XML (input)</th><th>dbt SQL (output)</th></tr>
-<tr>
-<td>
+```bash
+git clone <repo-url> && cd dbt-model-agent
 
-```xml
-<node componentName="tMysqlInput">
-  <elementParameter name="TABLE"
-    value="&quot;raw_customers&quot;"/>
-</node>
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
 
-<node componentName="tFilterRow">
-  <elementParameter name="CONDITIONS">
-    <elementValue elementRef="INPUT_COLUMN"
-      value="status"/>
-    <elementValue elementRef="OPERATOR"
-      value="=="/>
-    <elementValue elementRef="RVALUE"
-      value="&quot;active&quot;"/>
-  </elementParameter>
-</node>
-
-<node componentName="tMysqlOutput">
-  <elementParameter name="TABLE"
-    value="&quot;active_customers&quot;"/>
-</node>
+# Install dependencies
+pip install -e ".[dev]"
 ```
 
-</td>
-<td>
+### 2. Seed the Database
 
-```sql
-{{ config(materialized='table') }}
+This loads sample raw data (customers, orders, payments) into a local DuckDB database:
 
-SELECT
-    id,
-    first_name,
-    last_name,
-    email,
-    status
-FROM {{ source('jaffle_shop', 'raw_customers') }}
-WHERE status = 'active'
+```bash
+venv/bin/dbt seed --profiles-dir .
 ```
 
-</td>
-</tr>
-</table>
+### 3. Run the App
 
-### Example 2: Join (`tMap` with LEFT JOIN)
-
-<table>
-<tr><th>Talend XML (input)</th><th>dbt SQL (output)</th></tr>
-<tr>
-<td>
-
-```xml
-<!-- Two inputs: orders + customers -->
-<inputTables name="row1">  <!-- orders -->
-  <mapperTableEntries name="id"/>
-  <mapperTableEntries name="user_id"/>
-</inputTables>
-
-<inputTables name="row2" innerJoin="false">
-  <!-- LEFT JOIN: row2.id = row1.user_id -->
-  <mapperTableEntries name="id"
-    expression="row1.user_id"/>
-  <mapperTableEntries name="first_name"/>
-  <mapperTableEntries name="last_name"/>
-</inputTables>
-
-<outputTables name="out1">
-  <mapperTableEntries name="order_id"
-    expression="row1.id"/>
-  <mapperTableEntries name="customer_name"
-    expression='row2.first_name + " " 
-    + row2.last_name'/>
-  <mapperTableEntries name="amount_dollars"
-    expression="row1.amount / 100.0"/>
-</outputTables>
+```bash
+venv/bin/streamlit run src/ui.py
 ```
 
-</td>
-<td>
+Open **http://localhost:8501** in your browser.
 
-```sql
-{{ config(materialized='table') }}
+### 4. Demo It
 
-WITH orders AS (
-    SELECT * FROM {{ source('jaffle_shop',
-      'raw_orders') }}
-),
+1. Click any sample job in the left sidebar (e.g., "Filter Active Customers")
+2. See the generated SQL, schema YAML, and source YAML instantly
+3. Click "⬇️ Download" to get a zip of all generated files
+4. (Optional) Toggle "Use LLM" in the sidebar to compare AI vs deterministic output
 
-customers AS (
-    SELECT * FROM {{ source('jaffle_shop',
-      'raw_customers') }}
-)
+### 5. Verify Everything Works
 
-SELECT
-    orders.id AS order_id,
-    orders.user_id AS customer_id,
-    orders.order_date,
-    orders.status,
-    customers.first_name || ' '
-      || customers.last_name
-      AS customer_name,
-    orders.amount / 100.0 AS amount_dollars
-FROM orders
-LEFT JOIN customers
-    ON orders.user_id = customers.id
+Run the full validation pipeline:
+
+```bash
+# Unit tests (parser, converter, end-to-end)
+venv/bin/python -m pytest tests/ -v
+
+# Generate models from all 6 sample Talend jobs
+venv/bin/python -c "
+from dataclasses import asdict
+from src.parser import parse_talend_job
+from src.converter import TalendToDbtConverter, write_dbt_files
+import os, glob
+for f in sorted(glob.glob('fixtures/talend_jobs/*.item')):
+    parsed = asdict(parse_talend_job(f))
+    result = TalendToDbtConverter(parsed).convert(source_schema='main')
+    write_dbt_files(result)
+    print(f'  ✓ {os.path.basename(f):40s} → {result.model_name}.sql')
+"
+
+# Lint all generated SQL
+venv/bin/sqlfluff lint models/generated/
+
+# Compile all dbt models
+venv/bin/dbt compile --profiles-dir .
+
+# Run all models against DuckDB
+venv/bin/dbt run --profiles-dir .
+
+# Run data quality tests
+venv/bin/dbt test --profiles-dir .
 ```
 
-</td>
-</tr>
-</table>
-
-### Example 3: Aggregation (`tMap` + `tAggregateRow`)
-
-<table>
-<tr><th>Talend XML (input)</th><th>dbt SQL (output)</th></tr>
-<tr>
-<td>
-
-```xml
-<!-- tMap: rename + transform -->
-<outputTables name="out1">
-  <mapperTableEntries name="payment_id"
-    expression="row1.id"/>
-  <mapperTableEntries name="payment_method"
-    expression="StringHandling.UPCASE(
-      row1.payment_method)"/>
-  <mapperTableEntries name="amount_dollars"
-    expression="row1.amount / 100.0"/>
-</outputTables>
-
-<!-- tAggregateRow: GROUP BY -->
-<elementParameter name="GROUP_BY">
-  <elementValue elementRef="INPUT_COLUMN"
-    value="payment_method"/>
-</elementParameter>
-<elementParameter name="OPERATIONS">
-  <elementValue elementRef="INPUT_COLUMN"
-    value="amount_dollars"/>
-  <elementValue elementRef="FUNCTION"
-    value="sum"/>
-  <elementValue elementRef="OUTPUT_COLUMN"
-    value="total_amount"/>
-</elementParameter>
-```
-
-</td>
-<td>
-
-```sql
-{{ config(materialized='table') }}
-
-WITH payments AS (
-    SELECT * FROM {{ source('jaffle_shop',
-      'raw_payments') }}
-),
-
-transformed AS (
-    SELECT
-        payments.id AS payment_id,
-        payments.order_id,
-        UPPER(payments.payment_method)
-          AS payment_method,
-        payments.amount / 100.0
-          AS amount_dollars
-    FROM payments
-)
-
-SELECT
-    payment_method,
-    SUM(amount_dollars) AS total_amount,
-    COUNT(payment_id) AS transaction_count
-FROM transformed
-GROUP BY payment_method
-```
-
-</td>
-</tr>
-</table>
-
----
-
-## Architecture
-
-```
-                    Phase 1 (AI Agent)                          Phase 2 (Deterministic)
-              ┌─────────────────────────┐                ┌──────────────────────────────┐
-              │                         │                │                              │
-JSON Schema ──▶  POST /generate_model   │   Talend XML ──▶  POST /convert_talend       │
-              │                         │                │                              │
-              │  LangGraph Agent Loop   │                │  talend_parser.py            │
-              │    ├─ generate_sources  │                │    └─ Parse XML structure    │
-              │    └─ generate_model    │                │  talend_to_dbt.py            │
-              │       ├─ sqlfluff lint  │                │    ├─ Translate expressions  │
-              │       └─ self-correct   │                │    ├─ Generate CTE SQL       │
-              │                         │                │    └─ Generate schema YAML   │
-              └────────┬────────────────┘                └──────────┬───────────────────┘
-                       │                                            │
-                       └──────────────┐  ┌──────────────────────────┘
-                                      ▼  ▼
-                              models/generated/
-                              ├── *.sql          (dbt models)
-                              ├── *_schema.yml   (tests)
-                              └── *_sources.yml  (source defs)
-                                      │
-                                      ▼
-                                 dbt compile ✓
-```
+Expected results:
+- **pytest**: 56/56 tests pass
+- **sqlfluff**: "All Finished!" (no lint errors)
+- **dbt run**: 6 models created, 0 errors
+- **dbt test**: 14 data tests pass, 0 failures
 
 ## Project Structure
 
 ```
 dbt-model-agent/
-├── streamlit_app.py            # Streamlit UI — visual demo interface
-├── agent.py                    # FastAPI server + LangGraph agent + tools
-├── talend_parser.py            # Talend XML parser — extracts components and data flow
-├── talend_to_dbt.py            # Deterministic Talend → dbt converter
-├── test_api.py                 # Phase 1 test client (JSON schemas → agent)
-├── test_talend_conversion.py   # Phase 2 test suite (Talend XML → dbt)
-├── demo_schemas.json           # 3 JSON schemas for Phase 1 testing
-├── talend_jobs/                # Sample Talend job exports
-│   ├── filter_active_customers.item
-│   ├── join_orders_customers.item
-│   └── aggregate_payments.item
-├── .streamlit/config.toml      # Dark theme config
+├── src/
+│   ├── __init__.py          # Centralized path config
+│   ├── parser.py            # Talend XML parser → TalendJob dataclass
+│   ├── converter.py         # TalendJob → dbt SQL/YAML converter
+│   ├── agent.py             # FastAPI + LangGraph AI agent (optional)
+│   └── ui.py                # Streamlit UI (main entry point)
+├── fixtures/
+│   └── talend_jobs/         # 6 sample Talend .item files
+├── seeds/                   # Raw CSV data for DuckDB
+│   ├── raw_customers.csv
+│   ├── raw_orders.csv
+│   └── raw_payments.csv
 ├── models/
-│   ├── generated/              # All agent/converter output lands here
-│   │   ├── active_customers.sql
-│   │   ├── order_details.sql
-│   │   ├── payment_summary.sql
-│   │   ├── stg_customers.sql
-│   │   ├── stg_orders.sql
-│   │   ├── stg_payments.sql
-│   │   ├── *_schema.yml
-│   │   └── jaffle_shop_sources.yml
-│   ├── customers.sql           # Existing downstream model
-│   └── orders.sql              # Existing downstream model
-├── seeds/                      # Raw CSV data (loaded via dbt seed)
-├── logs/                       # Rotating log files (auto-created)
-├── .env.example                # Template for API keys
-├── dbt_project.yml
-└── pyproject.toml
+│   └── generated/           # Output: generated dbt models go here
+├── tests/                   # pytest test suite
+├── dbt_project.yml          # dbt project config
+├── profiles.yml             # dbt connection config (DuckDB)
+└── .sqlfluff                # SQL linter config
 ```
 
-## Quick Start
+## Sample Talend Jobs Included
 
-### 1. Install Dependencies
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install dbt-core dbt-duckdb sqlfluff fastapi uvicorn langchain langchain-openai langgraph python-dotenv pyyaml streamlit
-```
-
-### 2. Seed the Database
-
-```bash
-dbt seed
-```
-
-### 3. Launch the Streamlit UI (Recommended for Demos)
-
-```bash
-streamlit run streamlit_app.py
-```
-
-Open http://localhost:8501 → click any sample in the sidebar → see it convert instantly.
-
-### 4. Run Phase 2 (Talend → dbt) — CLI
-
-```bash
-python3 test_talend_conversion.py
-```
-
-Expected output:
-```
-✓  filter_active_customers.item  → active_customers   (lint: pass)
-✓  join_orders_customers.item    → order_details       (lint: pass)
-✓  aggregate_payments.item       → payment_summary     (lint: pass)
-✓  dbt compile: PASSED
-🎉 All tests passed!
-```
-
-### 5. Run Phase 1 (AI Agent) — Requires OpenAI Key
-
-```bash
-cp .env.example .env
-# Edit .env: OPENAI_API_KEY=sk-your-key-here
-
-# Terminal 1: Start server
-uvicorn agent:app
-
-# Terminal 2: Run demo
-python3 test_api.py
-```
-
-> **Note:** Do not use `uvicorn --reload` — the agent writes files to `models/`, which triggers the file watcher.
-
-## API Endpoints
-
-| Endpoint | Method | LLM Required | Description |
-|---|---|---|---|
-| `/generate_model` | POST | Yes | Generate a dbt model from a JSON schema (AI agent) |
-| `/convert_talend` | POST | No | Convert a Talend `.item` file to a dbt model |
-| `/validate_project` | POST | No | Run `dbt compile` on the full project |
-
-### `POST /convert_talend` — Example
-
-```bash
-curl -X POST http://localhost:8000/convert_talend \
-  -H "Content-Type: application/json" \
-  -d '{"job_file": "talend_jobs/filter_active_customers.item"}'
-```
-
-### `POST /generate_model` — Example
-
-```bash
-curl -X POST http://localhost:8000/generate_model \
-  -H "Content-Type: application/json" \
-  -d '{
-    "schema_def": {
-      "table_name": "stg_customers",
-      "source_name": "jaffle_shop",
-      "source_table": "raw_customers",
-      "columns": [
-        {"name": "customer_id", "type": "int", "description": "Primary key"},
-        {"name": "first_name", "type": "string", "description": "First name"}
-      ],
-      "transformations": "Select id as customer_id. Uppercase first_name."
-    }
-  }'
-```
-
-## Talend Component Support
-
-| Talend Component | dbt Equivalent | Status |
+| Job | Talend Pipeline | What It Tests |
 |---|---|---|
-| `tMysqlInput` / `tDBInput` | `{{ source('name', 'table') }}` | ✅ Supported |
-| `tMap` (column mapping) | `SELECT col AS alias` | ✅ Supported |
-| `tMap` (join) | `LEFT JOIN` / `INNER JOIN` | ✅ Supported |
-| `tMap` (expressions) | `UPPER()`, `||`, math | ✅ Supported |
-| `tFilterRow` | `WHERE` clause | ✅ Supported |
-| `tAggregateRow` | `GROUP BY` + `SUM/COUNT/MIN/MAX/AVG` | ✅ Supported |
-| `tMysqlOutput` / `tDBOutput` | Materialized dbt model | ✅ Supported |
-| `tNormalize` / `tDenormalize` | `UNPIVOT` / `PIVOT` | ❌ Not yet |
-| `tUnite` | `UNION ALL` | ❌ Not yet |
-| `tSortRow` | `ORDER BY` | ❌ Not yet |
+| `filter_active_customers.item` | Input → Filter → Output | Simple `WHERE` clause |
+| `04_multi_filter.item` | Input → Filter(2 conditions) → Output | `WHERE x AND y` |
+| `join_orders_customers.item` | 2 Inputs → tMap(join) → Output | `LEFT JOIN` + column expressions |
+| `05_join_with_filter.item` | 2 Inputs → tMap(join) → Filter → Output | `JOIN` + `WHERE` together |
+| `aggregate_payments.item` | Input → Aggregate → Output | `GROUP BY` + `SUM`/`COUNT` |
+| `06_full_pipeline.item` | 2 Inputs → tMap(join) → Aggregate → Output | `JOIN` + `GROUP BY` + `UPPER()` |
 
-## Expression Translation
+## Running Modes
 
-| Talend (Java) | SQL Output |
-|---|---|
-| `row1.column_name` | `alias.column_name` |
-| `row1.amount / 100.0` | `alias.amount / 100.0` |
-| `StringHandling.UPCASE(row1.col)` | `UPPER(alias.col)` |
-| `StringHandling.DOWNCASE(row1.col)` | `LOWER(alias.col)` |
-| `StringHandling.TRIM(row1.col)` | `TRIM(alias.col)` |
-| `row1.first + " " + row1.last` | `alias.first \|\| ' ' \|\| alias.last` |
+### Deterministic Mode (default)
+Pattern-matched conversion. No API key needed. Handles all 6 supported component types reliably.
 
-## Logging
+### LLM Mode (optional)
+Toggle "Use LLM" in the sidebar. Requires `OPENAI_API_KEY` in a `.env` file. Uses GPT-4o-mini via a LangGraph ReAct agent with self-correction (writes SQL → runs sqlfluff → fixes errors automatically).
 
-| Log File | Source | Contains |
-|---|---|---|
-| `logs/agent.log` | Server (`agent.py`) | Agent reasoning, tool calls, validation results |
-| `logs/test_api.log` | Client (`test_api.py`) | HTTP request/response status, timing |
-
-Both log files rotate at 5 MB with 3 backups and mirror to console.
-
-## Switching LLM Providers
-
-The Phase 1 agent uses OpenAI `gpt-4o-mini`. To switch:
-
-```python
-# Google Gemini (free tier available)
-from langchain_google_genai import ChatGoogleGenerativeAI
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
-
-# Anthropic Claude
-from langchain_anthropic import ChatAnthropic
-llm = ChatAnthropic(model="claude-sonnet-4-20250514", temperature=0)
+### FastAPI Server (optional)
+For programmatic access:
+```bash
+venv/bin/uvicorn src.agent:app --host 0.0.0.0 --port 8000
 ```
+Endpoints:
+- `POST /convert_talend` — Deterministic conversion
+- `POST /generate_model` — LLM-based generation
+- `POST /validate_project` — Runs `dbt compile`
 
-## Tech Stack
-
-- **Agent Framework:** LangGraph + LangChain
-- **LLM:** OpenAI gpt-4o-mini (configurable, Phase 1 only)
-- **API Framework:** FastAPI + Uvicorn
-- **UI:** Streamlit
-- **Data Warehouse:** DuckDB
-- **dbt:** dbt-core + dbt-duckdb
-- **SQL Linting:** sqlfluff
-- **Built on:** [jaffle_shop_duckdb](https://github.com/dbt-labs/jaffle_shop_duckdb) by dbt Labs (Apache 2.0)
+> ⚠️ Do **not** use `uvicorn --reload` — the agent writes to `models/generated/` which triggers the file watcher in an infinite loop.

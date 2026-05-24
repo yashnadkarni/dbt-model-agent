@@ -1,13 +1,12 @@
 [project]
-name = "jaffle-shop"
-version = "0.1.0"
-description = "A self-contained dbt project using DuckDB"
-requires-python = ">=3.13"
+name = "dbt-model-agent"
+version = "0.2.0"
+description = "AI-powered agent + deterministic converter for generating dbt models from JSON schemas and Talend ETL jobs"
+requires-python = ">=3.9"
 dependencies = [
-    "dbt-duckdb>=1.10.1",
-    "dbt-core>=1.11.0",
+    "dbt-duckdb>=1.10.0",
+    "dbt-core>=1.10.0",
     "sqlfluff>=3",
-    # Constrain chardet to avoid RequestsDependencyWarning from requests
     "chardet<6",
     "langchain>=0.1.0",
     "langchain-openai>=0.1.0",
@@ -15,4 +14,15 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.30.0",
+    "streamlit>=1.30.0",
+    "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

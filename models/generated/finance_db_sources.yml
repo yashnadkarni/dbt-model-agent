@@ -1,0 +1,4 @@
+sources:
+- name: finance_db
+  tables:
+  - name: raw_transactions

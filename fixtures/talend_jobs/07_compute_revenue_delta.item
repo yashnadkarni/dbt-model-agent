@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd">
+  <talendfile:ProcessItem>
+    <process defaultContext="Default">
+
+      <context name="Default"/>
+
+      <node componentName="tMysqlInput" posX="96" posY="128">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_1"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;finance_db&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;raw_transactions&quot;"/>
+        <elementParameter field="TEXT" name="SCHEMA_DB" value="&quot;accounting&quot;"/>
+        <elementParameter field="TEXT" name="QUERY" value="&quot;SELECT transaction_id, gross_revenue, tax_amount FROM raw_transactions&quot;"/>
+        <metadata name="tMysqlInput_1">
+          <column name="transaction_id" type="id_Integer" key="true" nullable="false"/>
+          <column name="gross_revenue" type="id_Integer" nullable="true"/>
+          <column name="tax_amount" type="id_Integer" nullable="true"/>
+        </metadata>
+      </node>
+
+      <node componentName="tFilterRow" posX="288" posY="128">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tFilterRow_1"/>
+        <elementParameter field="TABLE" name="CONDITIONS">
+          <elementValue elementRef="INPUT_COLUMN" value="gross_revenue"/>
+          <elementValue elementRef="FUNCTION" value=""/>
+          <elementValue elementRef="OPERATOR" value="&gt;"/>
+          <elementValue elementRef="RVALUE" value="0"/>
+        </elementParameter>
+      </node>
+
+      <node componentName="tMysqlOutput" posX="480" posY="128">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlOutput_1"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;finance_db&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;net_revenue_ledger&quot;"/>
+        <elementParameter field="TEXT" name="SCHEMA_DB" value="&quot;accounting&quot;"/>
+        <elementParameter field="TEXT" name="ACTION_ON_TABLE" value="DROP_CREATE"/>
+        <elementParameter field="TEXT" name="ACTION_ON_DATA" value="INSERT"/>
+        <metadata name="tMysqlOutput_1">
+          <column name="transaction_id" type="id_Integer" key="true" nullable="false"/>
+          <column name="gross_revenue" type="id_Integer" nullable="true"/>
+          <column name="tax_amount" type="id_Integer" nullable="true"/>
+          <column name="net_revenue" type="id_Integer" nullable="true"/>
+        </metadata>
+      </node>
+
+      <connection connectorName="FLOW" label="row1" source="tMysqlInput_1" target="tFilterRow_1"/>
+      <connection connectorName="FLOW" label="row2" source="tFilterRow_1" target="tMysqlOutput_1"/>
+
+    </process>
+  </talendfile:ProcessItem>
+</xmi:XMI>

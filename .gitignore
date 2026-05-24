@@ -14,5 +14,8 @@ env/
 **/*.duckdb
 **/*.duckdb.wal
 __pycache__/
+.pytest_cache/
+*.egg-info/
 jaffle-data/
 parsed_talend_jobs.json
+uv.lock

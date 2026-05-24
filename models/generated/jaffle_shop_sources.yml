@@ -1,6 +1,5 @@
 sources:
 - name: jaffle_shop
   tables:
-  - name: raw_customers
-  - name: raw_orders
-  - name: raw_payments
+  - raw_orders
+  - raw_customers

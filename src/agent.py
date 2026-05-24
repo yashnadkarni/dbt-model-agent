@@ -7,11 +7,17 @@ with built-in validation and testing.
 """
 
 import os
+import sys
 import json
 import glob
 import logging
 import subprocess
 from logging.handlers import RotatingFileHandler
+
+# Ensure project root is on sys.path
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import yaml
 from fastapi import FastAPI, HTTPException
@@ -26,9 +32,7 @@ from langgraph.prebuilt import create_react_agent
 # ---------------------------------------------------------------------------
 load_dotenv()
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-GENERATED_MODELS_DIR = os.path.join(PROJECT_ROOT, "models", "generated")
-LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
+from src import PROJECT_ROOT, GENERATED_MODELS_DIR, LOGS_DIR, SQLFLUFF_BIN, DBT_BIN
 os.makedirs(LOGS_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
@@ -203,10 +207,9 @@ def generate_dbt_model(table_name: str, sql_content: str, yaml_content: str) -> 
     _remove_conflicting_models(table_name)
 
     # --- sqlfluff lint (per-file, no project-graph scan) ---
-    venv_sqlfluff = os.path.join(PROJECT_ROOT, "venv", "bin", "sqlfluff")
     try:
         result = subprocess.run(
-            [venv_sqlfluff, "lint", model_path],
+            [SQLFLUFF_BIN, "lint", model_path],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
@@ -220,7 +223,7 @@ def generate_dbt_model(table_name: str, sql_content: str, yaml_content: str) -> 
             )
         logger.info("sqlfluff lint passed for '%s'", table_name)
     except FileNotFoundError:
-        logger.error("sqlfluff binary not found at %s", venv_sqlfluff)
+        logger.error("sqlfluff binary not found at %s", SQLFLUFF_BIN)
         return "Tool error: sqlfluff binary not found. Check your venv."
     except Exception as exc:
         logger.error("Unexpected error during validation: %s", exc)
@@ -230,6 +233,143 @@ def generate_dbt_model(table_name: str, sql_content: str, yaml_content: str) -> 
         f"Successfully generated and verified dbt model at {model_path} "
         f"and schema at {schema_path}"
     )
+
+# ---------------------------------------------------------------------------
+# Prompt Builder (Talend → Agent)
+# ---------------------------------------------------------------------------
+
+def build_talend_prompt(parsed_dict: dict) -> tuple[str, str, str]:
+    """
+    Build a structured prompt from a parsed Talend job dict.
+
+    Returns:
+        (prompt, target_name, source_name)
+    """
+    sources_desc = ", ".join(
+        f"{s['table_name']} ({s['component_type']})"
+        for s in parsed_dict["sources"]
+    )
+    target = parsed_dict["targets"][0] if parsed_dict["targets"] else {}
+    target_name = target.get("table_name", "output")
+    target_cols = ", ".join(c["name"] for c in target.get("columns", []))
+
+    transforms_desc = []
+    for t in parsed_dict["transformations"]:
+        if t["component_type"] == "tFilterRow":
+            for f in t.get("filters", []):
+                transforms_desc.append(f"Filter: {f['input_column']} {f['operator']} {f['value']}")
+        elif t["component_type"] == "tMap":
+            for m in t.get("column_mappings", []):
+                transforms_desc.append(f"Map: {m['output_column']} = {m['expression']}")
+            for j in t.get("joins", []):
+                transforms_desc.append(f"Join: {j['join_type']} JOIN on {j['lookup_table']}.{j['join_column']} = {j['join_expression']}")
+        elif t["component_type"] == "tAggregateRow":
+            for g in t.get("group_by_columns", []):
+                transforms_desc.append(f"Group by: {g}")
+            for a in t.get("aggregations", []):
+                transforms_desc.append(f"Aggregate: {a['output_column']} = {a['function']}({a['input_column']})")
+
+    source_name = parsed_dict["sources"][0].get("database", "raw") if parsed_dict["sources"] else "raw"
+    source_tables = [s["table_name"] for s in parsed_dict["sources"]]
+
+    prompt = (
+        f"Generate a dbt model for a Talend ETL migration.\n\n"
+        f"Source tables: {sources_desc}\n"
+        f"Source name: {source_name}\n"
+        f"Target table: {target_name}\n"
+        f"Target columns: {target_cols}\n"
+        f"Transformations:\n" + "\n".join(f"  - {t}" for t in transforms_desc) + "\n\n"
+        f"Instructions:\n"
+        f"1. Call generate_dbt_sources with source_name='{source_name}'\n"
+        f"   The yaml_content must be a valid sources: block declaring "
+        f"source '{source_name}' with tables: {source_tables}\n"
+        f"2. Call generate_dbt_model with table_name='{target_name}'\n"
+        f"3. Use {{{{ source('{source_name}', 'table') }}}} syntax\n"
+        f"4. Use CTEs for readability\n"
+        f"5. Add not_null and unique tests on key columns in schema YAML\n"
+        f"6. If the tool returns a validation error, fix the SQL and retry.\n"
+        f"7. Make sure the SQL file ends with a single trailing newline.\n"
+    )
+
+    return prompt, target_name, source_name
+
+
+# ---------------------------------------------------------------------------
+# Reusable Agent Runner
+# ---------------------------------------------------------------------------
+
+def run_generation_agent(user_prompt: str, table_name: str, source_name: str) -> dict:
+    """
+    Core agent execution logic — reusable by both the FastAPI endpoint
+    and the Streamlit UI.
+
+    Runs the LangGraph ReAct agent with the real tools (file writing +
+    sqlfluff validation + self-correction loop).
+
+    Returns:
+        dict with keys: success, table_name, sql_content, schema_yaml,
+        source_yaml, agent_transcript, and optionally error.
+    """
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return {"success": False, "error": "OPENAI_API_KEY not set in .env"}
+
+    logger.info("━━━ Starting generation for '%s' ━━━", table_name)
+
+    # --- Build agent ---
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    tools = [generate_dbt_model, generate_dbt_sources]
+    agent = create_react_agent(llm, tools)
+
+    # --- Stream agent execution ---
+    inputs = {"messages": [("user", user_prompt)]}
+    messages_out = []
+
+    try:
+        # Cap recursion to prevent infinite retry loops.
+        # 10 steps ≈ 3 tool calls with retries + final response.
+        config = {"recursion_limit": 10}
+        for chunk in agent.stream(inputs, stream_mode="values", config=config):
+            message = chunk["messages"][-1]
+            if hasattr(message, "content") and message.content:
+                messages_out.append({"role": "agent", "content": message.content})
+                logger.info("Agent: %s", message.content[:200])
+            elif hasattr(message, "tool_calls") and message.tool_calls:
+                tool_name = message.tool_calls[0].get("name")
+                messages_out.append({"role": "agent", "tool": tool_name})
+                logger.info("Agent calling tool: %s", tool_name)
+    except Exception as exc:
+        logger.exception("Agent execution failed for '%s'", table_name)
+        return {"success": False, "error": str(exc)}
+
+    logger.info("━━━ Completed generation for '%s' ━━━", table_name)
+
+    # --- Read back generated files ---
+    result = {
+        "success": True,
+        "table_name": table_name,
+        "agent_transcript": messages_out,
+        "sql_content": "",
+        "schema_yaml": "",
+        "source_yaml": "",
+    }
+
+    sql_path = os.path.join(GENERATED_MODELS_DIR, f"{table_name}.sql")
+    schema_path = os.path.join(GENERATED_MODELS_DIR, f"{table_name}_schema.yml")
+    source_path = os.path.join(GENERATED_MODELS_DIR, f"{source_name}_sources.yml")
+
+    if os.path.exists(sql_path):
+        with open(sql_path) as f:
+            result["sql_content"] = f.read()
+    if os.path.exists(schema_path):
+        with open(schema_path) as f:
+            result["schema_yaml"] = f.read()
+    if os.path.exists(source_path):
+        with open(source_path) as f:
+            result["source_yaml"] = f.read()
+
+    return result
+
 
 # ---------------------------------------------------------------------------
 # API Endpoints
@@ -250,22 +390,10 @@ def generate_model(request: GenerationRequest):
     `generate_dbt_sources` and `generate_dbt_model` tools, validates
     the output with sqlfluff, and returns the agent transcript.
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        logger.error("OPENAI_API_KEY is not set")
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY environment variable is not set.")
-
     schema_json = request.schema_def
     table_name = schema_json.get("table_name", "unknown")
     source_name = schema_json.get("source_name", "jaffle_shop")
     source_table = schema_json.get("source_table", f"raw_{table_name}")
-
-    logger.info("━━━ Starting generation for '%s' ━━━", table_name)
-
-    # --- Build agent ---
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    tools = [generate_dbt_model, generate_dbt_sources]
-    agent = create_react_agent(llm, tools)
 
     user_prompt = (
         f"You are a stellar dbt engineer. Please generate a dbt model and schema tests "
@@ -287,29 +415,15 @@ def generate_model(request: GenerationRequest):
         f"Work through this step-by-step."
     )
 
-    # --- Stream agent execution ---
-    inputs = {"messages": [("user", user_prompt)]}
-    messages_out = []
+    result = run_generation_agent(user_prompt, table_name, source_name)
 
-    try:
-        for chunk in agent.stream(inputs, stream_mode="values"):
-            message = chunk["messages"][-1]
-            if hasattr(message, "content") and message.content:
-                messages_out.append({"role": "agent", "content": message.content})
-                logger.info("Agent: %s", message.content[:200])
-            elif hasattr(message, "tool_calls") and message.tool_calls:
-                tool_name = message.tool_calls[0].get("name")
-                messages_out.append({"role": "agent", "tool": tool_name})
-                logger.info("Agent calling tool: %s", tool_name)
-    except Exception as exc:
-        logger.exception("Agent execution failed for '%s'", table_name)
-        raise HTTPException(status_code=500, detail=f"Agent error: {exc}") from exc
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result["error"])
 
-    logger.info("━━━ Completed generation for '%s' ━━━", table_name)
     return {
         "status": "success",
-        "table_name": table_name,
-        "agent_transcript": messages_out,
+        "table_name": result["table_name"],
+        "agent_transcript": result["agent_transcript"],
     }
 
 
@@ -320,7 +434,7 @@ def validate_project():
     models, sources, and refs resolve correctly. Call this after all
     models have been generated.
     """
-    venv_dbt = os.path.join(PROJECT_ROOT, "venv", "bin", "dbt")
+    venv_dbt = DBT_BIN
     logger.info("Running full dbt compile validation…")
 
     try:
@@ -366,8 +480,8 @@ def convert_talend(request: TalendConversionRequest):
     No LLM required — uses pattern-matched translation.
     """
     from dataclasses import asdict
-    from talend_parser import parse_talend_job
-    from talend_to_dbt import TalendToDbtConverter, write_dbt_files, validate_sql
+    from src.parser import parse_talend_job
+    from src.converter import TalendToDbtConverter, write_dbt_files, validate_sql
 
     # Resolve file path
     job_path = request.job_file

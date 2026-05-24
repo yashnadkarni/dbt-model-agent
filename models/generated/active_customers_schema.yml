@@ -1,3 +1,5 @@
+version: 2
+
 models:
 - name: active_customers
   description: 'dbt model converted from Talend job: filter_active_customers.item'

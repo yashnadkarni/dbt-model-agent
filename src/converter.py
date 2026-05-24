@@ -13,7 +13,7 @@ Supported Talend components:
   - tAggregateRow → SQL GROUP BY + aggregate functions
 
 Usage:
-    from talend_to_dbt import TalendToDbtConverter
+    from src.converter import TalendToDbtConverter
     converter = TalendToDbtConverter(parsed_job_dict)
     result = converter.convert()
 """
@@ -26,10 +26,9 @@ from dataclasses import dataclass, field
 
 import yaml
 
-logger = logging.getLogger("agent.converter")
+from src import PROJECT_ROOT, GENERATED_MODELS_DIR, SQLFLUFF_BIN
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-GENERATED_MODELS_DIR = os.path.join(PROJECT_ROOT, "models", "generated")
+logger = logging.getLogger("agent.converter")
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +342,8 @@ class TalendToDbtConverter:
         Generate SQL WHERE clause from tFilterRow conditions.
 
         Multiple conditions are combined with AND.
+        When the query involves multiple source tables, bare column names
+        are qualified with the first source alias to satisfy sqlfluff RF02.
         """
         filters = self._get_transformations_by_type("tFilterRow")
         if not filters:
@@ -354,9 +355,26 @@ class TalendToDbtConverter:
                 sql_cond = translate_filter_to_sql(cond, self.row_to_alias)
                 conditions.append(sql_cond)
 
-        if conditions:
-            return "WHERE " + "\n  AND ".join(conditions)
-        return ""
+        if not conditions:
+            return ""
+
+        # If multiple source tables, qualify bare column names (RF02)
+        if len(self.row_to_alias) > 1:
+            first_alias = list(self.row_to_alias.values())[0]
+            qualified = []
+            for cond in conditions:
+                # Only qualify if the left side is a bare column (no dot)
+                parts = cond.split(" ", 1)
+                if "." not in parts[0]:
+                    qualified.append(f"{first_alias}.{cond}")
+                else:
+                    qualified.append(cond)
+            conditions = qualified
+
+        if len(conditions) == 1:
+            return f"WHERE {conditions[0]}"
+        # Multiple conditions: WHERE on its own conceptual line, conditions indented
+        return "WHERE\n    " + "\n    AND ".join(conditions)
 
     def _generate_group_by(self, agg: dict) -> str:
         """Generate SQL GROUP BY + aggregate SELECT from tAggregateRow."""
@@ -397,14 +415,41 @@ class TalendToDbtConverter:
         lines = ["{{ config(materialized='table') }}", ""]
 
         # --- Case 1: Simple filter (no tMap, no aggregation) ---
+        # Wrap the source in a CTE for consistency with all other cases.
+        # This makes it easy to add further transformation steps later
+        # without restructuring the SQL.
         if not has_tmap and not has_agg and filters:
             src = list(self.row_to_source.values())[0] if self.row_to_source else self.job["sources"][0]
             table = src["table_name"]
-            cols = [c["name"] for c in src.get("columns", [])]
-            col_list = ",\n    ".join(cols) if cols else "*"
+            alias = derive_alias(table)
+            source_cols = [c["name"] for c in src.get("columns", [])]
 
+            # Check if the target has columns not present in the source.
+            # This happens when Talend computes derived columns (e.g. net_revenue)
+            # that aren't defined via a tMap. We emit NULL placeholders so the
+            # generated schema stays consistent, and warn the user.
+            target = self.job["targets"][0] if self.job.get("targets") else None
+            target_cols = [c["name"] for c in target.get("columns", [])] if target else []
+            source_col_set = set(source_cols)
+
+            select_parts = list(source_cols)
+            for tc in target_cols:
+                if tc not in source_col_set:
+                    select_parts.append(f"NULL AS {tc}")
+                    self.warnings.append(
+                        f"Column '{tc}' exists in target but not in source. "
+                        f"Added as NULL — replace with the actual calculation "
+                        f"(Check mapping rules for this target field)."
+                    )
+
+            col_list = ",\n    ".join(select_parts) if select_parts else "*"
+
+            lines.append(f"WITH {alias} AS (")
+            lines.append(f"    SELECT * FROM {{{{ source('{source_name}', '{table}') }}}}")
+            lines.append(")")
+            lines.append("")
             lines.append(f"SELECT\n    {col_list}")
-            lines.append(f"FROM {{{{ source('{source_name}', '{table}') }}}}")
+            lines.append(f"FROM {alias}")
             lines.append(self._generate_where_clause())
             return "\n".join(lines) + "\n"
 
@@ -535,11 +580,18 @@ class TalendToDbtConverter:
             }]
         }
 
-        return yaml.dump(schema, default_flow_style=False, sort_keys=False)
+        # Prepend version header — good practice for dbt readability and
+        # backward compatibility (required in dbt < 1.5, optional in 1.5+).
+        return "version: 2\n\n" + yaml.dump(schema, default_flow_style=False, sort_keys=False)
 
-    def generate_source_yaml(self) -> str:
+    def generate_source_yaml(self, source_schema: str = "") -> str:
         """
         Generate dbt source YAML declaring all source tables used by this job.
+
+        Args:
+            source_schema: Optional database schema override. For DuckDB,
+                seeds land in the 'main' schema, so pass source_schema='main'
+                to avoid dbt generating incorrect table references.
         """
         source_name = self._get_source_name()
         tables = []
@@ -550,21 +602,28 @@ class TalendToDbtConverter:
                 tables.append({"name": tname})
                 seen.add(tname)
 
-        source_def = {
-            "sources": [{
-                "name": source_name,
-                "tables": tables,
-            }]
+        source_entry = {
+            "name": source_name,
+            "tables": tables,
         }
-        return yaml.dump(source_def, default_flow_style=False, sort_keys=False)
+        if source_schema:
+            source_entry["schema"] = source_schema
+
+        source_def = {"sources": [source_entry]}
+        return "version: 2\n\n" + yaml.dump(source_def, default_flow_style=False, sort_keys=False)
 
     # -------------------------------------------------------------------
     # Main Conversion
     # -------------------------------------------------------------------
 
-    def convert(self) -> ConversionResult:
+    def convert(self, source_schema: str = "") -> ConversionResult:
         """
         Run the full conversion pipeline.
+
+        Args:
+            source_schema: Optional schema override for source YAML.
+                Pass 'main' for DuckDB projects where seeds live in the
+                default schema.
 
         Returns a ConversionResult containing:
           - model_name: Target table name (used as dbt model name)
@@ -578,7 +637,7 @@ class TalendToDbtConverter:
 
         sql_content = self.generate_sql()
         schema_yaml = self.generate_schema_yaml(model_name)
-        source_yaml = self.generate_source_yaml()
+        source_yaml = self.generate_source_yaml(source_schema=source_schema)
 
         source_tables = [src["table_name"] for src in self.job.get("sources", [])]
 
@@ -660,10 +719,9 @@ def write_dbt_files(result: ConversionResult, output_dir: str = GENERATED_MODELS
 
 def validate_sql(sql_path: str) -> dict:
     """Run sqlfluff lint on a generated SQL file."""
-    venv_sqlfluff = os.path.join(PROJECT_ROOT, "venv", "bin", "sqlfluff")
     try:
         result = subprocess.run(
-            [venv_sqlfluff, "lint", sql_path],
+            [SQLFLUFF_BIN, "lint", "--dialect", "duckdb", sql_path],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,

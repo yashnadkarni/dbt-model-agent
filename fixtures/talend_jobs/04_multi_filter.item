@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/XMI" xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd">
+  <talendfile:ProcessItem>
+    <process>
+      <!-- Source: raw_orders table -->
+      <node componentName="tMysqlInput" offsetLabelX="0" offsetLabelY="0" posX="64" posY="128">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlInput_1"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;jaffle_shop&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;raw_orders&quot;"/>
+        <elementParameter field="TEXT" name="QUERY" value="&quot;SELECT * FROM raw_orders&quot;"/>
+        <metadata name="tMysqlInput_1">
+          <column name="id" type="id_Integer" key="true" nullable="false"/>
+          <column name="user_id" type="id_Integer" nullable="false"/>
+          <column name="order_date" type="id_Date" nullable="true"/>
+          <column name="status" type="id_String" length="32" nullable="true"/>
+          <column name="amount" type="id_Integer" nullable="true"/>
+        </metadata>
+      </node>
+
+      <!-- Filter: status = 'completed' AND amount > 1000 -->
+      <node componentName="tFilterRow" offsetLabelX="0" offsetLabelY="0" posX="256" posY="128">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tFilterRow_1"/>
+        <elementParameter field="TABLE" name="CONDITIONS">
+          <elementValue elementRef="INPUT_COLUMN" value="status"/>
+          <elementValue elementRef="FUNCTION" value=""/>
+          <elementValue elementRef="OPERATOR" value="=="/>
+          <elementValue elementRef="RVALUE" value="&quot;completed&quot;"/>
+        </elementParameter>
+        <elementParameter field="TABLE" name="CONDITIONS">
+          <elementValue elementRef="INPUT_COLUMN" value="amount"/>
+          <elementValue elementRef="FUNCTION" value=""/>
+          <elementValue elementRef="OPERATOR" value="&gt;"/>
+          <elementValue elementRef="RVALUE" value="1000"/>
+        </elementParameter>
+      </node>
+
+      <!-- Target: high_value_orders table -->
+      <node componentName="tMysqlOutput" offsetLabelX="0" offsetLabelY="0" posX="448" posY="128">
+        <elementParameter field="TEXT" name="UNIQUE_NAME" value="tMysqlOutput_1"/>
+        <elementParameter field="TEXT" name="DBNAME" value="&quot;jaffle_shop&quot;"/>
+        <elementParameter field="TEXT" name="TABLE" value="&quot;high_value_orders&quot;"/>
+        <elementParameter field="TEXT" name="ACTION_ON_TABLE" value="DROP_CREATE"/>
+        <elementParameter field="TEXT" name="ACTION_ON_DATA" value="INSERT"/>
+        <metadata name="tMysqlOutput_1">
+          <column name="id" type="id_Integer" key="true" nullable="false"/>
+          <column name="user_id" type="id_Integer" nullable="false"/>
+          <column name="order_date" type="id_Date" nullable="true"/>
+          <column name="status" type="id_String" length="32" nullable="true"/>
+          <column name="amount" type="id_Integer" nullable="true"/>
+        </metadata>
+      </node>
+
+      <!-- Data flow connections -->
+      <connection connectorName="FLOW" label="row1" lineStyle="0"
+          metaname="tMysqlInput_1" offsetLabelX="0" offsetLabelY="0"
+          source="tMysqlInput_1" target="tFilterRow_1"/>
+      <connection connectorName="FLOW" label="row2" lineStyle="0"
+          metaname="tFilterRow_1" offsetLabelX="0" offsetLabelY="0"
+          source="tFilterRow_1" target="tMysqlOutput_1"/>
+    </process>
+  </talendfile:ProcessItem>
+</xmi:XMI>

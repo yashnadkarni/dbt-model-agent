@@ -1,20 +1,27 @@
-{{ config(materialized='table') }}
-
 WITH orders AS (
-    SELECT * FROM {{ source('jaffle_shop', 'raw_orders') }}
+    SELECT
+        id AS order_id,
+        user_id AS customer_id,
+        order_date,
+        status,
+        amount / 100.0 AS amount_dollars
+    FROM {{ source('jaffle_shop', 'raw_orders') }}
 ),
 
 customers AS (
-    SELECT * FROM {{ source('jaffle_shop', 'raw_customers') }}
+    SELECT
+        id,
+        first_name,
+        last_name
+    FROM {{ source('jaffle_shop', 'raw_customers') }}
 )
 
 SELECT
-    orders.id AS order_id,
-    orders.user_id AS customer_id,
-    orders.order_date,
-    orders.status,
-    customers.first_name || ' ' || customers.last_name AS customer_name,
-    orders.amount / 100.0 AS amount_dollars
-FROM orders
-LEFT JOIN customers
-    ON orders.user_id = customers.id
+    o.order_id,
+    o.customer_id,
+    CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
+    o.order_date,
+    o.status,
+    o.amount_dollars
+FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id

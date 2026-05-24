@@ -1,0 +1,4 @@
+sources:
+- name: sales_warehouse
+  tables:
+  - name: raw_orders

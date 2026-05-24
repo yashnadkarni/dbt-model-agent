@@ -1,21 +1,16 @@
+version: 2
 models:
-- name: order_details
-  description: 'dbt model converted from Talend job: join_orders_customers.item'
-  columns:
-  - name: order_id
-    description: Column order_id
-    tests:
-    - not_null
-    - unique
-  - name: customer_id
-    description: Column customer_id
-    tests:
-    - not_null
-  - name: customer_name
-    description: Column customer_name
-  - name: order_date
-    description: Column order_date
-  - name: status
-    description: Column status
-  - name: amount_dollars
-    description: Column amount_dollars
+  - name: order_details
+    description: "A model to aggregate order details from raw_orders and raw_customers."
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        tests:
+          - not_null
+      - name: customer_name
+      - name: order_date
+      - name: status
+      - name: amount_dollars

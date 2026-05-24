@@ -7,8 +7,8 @@ reads the XML structure and produces a structured Python dictionary describing
 the entire ETL pipeline: what it reads from, what it does, and where it writes.
 
 Usage:
-    python talend_parser.py                           # Parse all jobs in talend_jobs/
-    python talend_parser.py talend_jobs/my_job.item   # Parse a single job
+    python -m src.parser                                      # Parse all jobs in fixtures/talend_jobs/
+    python -m src.parser fixtures/talend_jobs/my_job.item      # Parse a single job
 """
 
 import os
@@ -17,6 +17,8 @@ import json
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field, asdict
 from typing import Optional
+from src import TALEND_JOBS_DIR
+from src import PROJECT_ROOT
 
 
 # ---------------------------------------------------------------------------
@@ -487,8 +489,8 @@ def main():
         # Parse specific file(s) passed as arguments
         filepaths = sys.argv[1:]
     else:
-        # Default: parse all .item files in talend_jobs/
-        jobs_dir = os.path.join(os.path.dirname(__file__), "talend_jobs")
+        # Default: parse all .item files in fixtures/talend_jobs/
+        jobs_dir = TALEND_JOBS_DIR
         if not os.path.isdir(jobs_dir):
             print(f"ERROR: Directory '{jobs_dir}' not found.")
             sys.exit(1)
@@ -510,7 +512,7 @@ def main():
         all_jobs.append(asdict(job))
 
     # Export to JSON for downstream consumption
-    output_path = os.path.join(os.path.dirname(__file__), "parsed_talend_jobs.json")
+    output_path = os.path.join(PROJECT_ROOT, "parsed_talend_jobs.json")
     with open(output_path, "w") as fh:
         json.dump(all_jobs, fh, indent=2, default=str)
     print(f"📁 Exported parsed data to: {output_path}")
