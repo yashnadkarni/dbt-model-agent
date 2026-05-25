@@ -146,7 +146,6 @@ SAMPLE_JOBS = {
     "🔀 Multi-Filter": "04_multi_filter.item",
     "🔗+🔍 Join + Filter": "05_join_with_filter.item",
     "⚡ Full Pipeline": "06_full_pipeline.item",
-    "💰 Revenue Delta": "07_compute_revenue_delta.item",
 }
 
 
