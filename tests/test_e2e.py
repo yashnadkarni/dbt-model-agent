@@ -19,7 +19,6 @@ ALL_JOBS = [
     "04_multi_filter.item",
     "05_join_with_filter.item",
     "06_full_pipeline.item",
-    "07_compute_revenue_delta.item",
 ]
 
 
