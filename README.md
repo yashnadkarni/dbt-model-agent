@@ -57,9 +57,11 @@ Open **http://localhost:8501** in your browser.
 ### 4. Sample Demo
 
 1. Click any sample job in the left sidebar (e.g., "Filter Active Customers")
-2. See the generated SQL, schema YAML, and source YAML instantly
-3. Click "⬇️ Download" to get a zip of all generated files
-4. (Optional) Toggle "Use LLM" in the sidebar to compare AI vs deterministic output
+2. Click **"🚀 Convert to dbt"** to generate the dbt model
+3. Review the generated SQL, schema YAML, and source YAML
+4. Click **"⬇️ Download"** to get a zip of all generated files
+5. Click **"🔍 Validate with dbt"** to run the full dbt pipeline (sqlfluff lint → dbt compile → dbt run → dbt test) and see pass/fail results
+6. (Optional) Toggle "Use LLM" in the sidebar to compare AI vs deterministic output — validation runs side-by-side for both
 
 ### 5. Verify Everything Works
 

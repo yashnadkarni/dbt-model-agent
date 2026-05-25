@@ -14,6 +14,7 @@ import sys
 import json
 import zipfile
 import tempfile
+import subprocess
 from dataclasses import asdict
 
 # Ensure project root is on sys.path (Streamlit runs scripts directly)
@@ -23,7 +24,7 @@ if _PROJECT_ROOT not in sys.path:
 
 import streamlit as st
 
-from src import PROJECT_ROOT, TALEND_JOBS_DIR
+from src import PROJECT_ROOT, TALEND_JOBS_DIR, GENERATED_MODELS_DIR, DBT_BIN, SQLFLUFF_BIN
 from src.parser import parse_talend_job
 from src.converter import TalendToDbtConverter
 
@@ -247,6 +248,153 @@ def create_zip(result: dict) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
+
+def validate_dbt_model(result: dict, label: str = "Deterministic") -> dict:
+    """
+    Write a model's generated files to models/generated/ and run the full
+    dbt validation pipeline: sqlfluff lint → dbt compile → dbt run → dbt test.
+
+    Returns a dict with step-by-step results for display in the UI.
+    """
+    model_name = result["model_name"]
+    source_name = result.get("source_name", "unknown")
+    os.makedirs(GENERATED_MODELS_DIR, exist_ok=True)
+
+    # Write SQL and schema (these are per-model, safe to overwrite)
+    sql_path = os.path.join(GENERATED_MODELS_DIR, f"{model_name}.sql")
+    schema_path = os.path.join(GENERATED_MODELS_DIR, f"{model_name}_schema.yml")
+    source_path = os.path.join(GENERATED_MODELS_DIR, f"{source_name}_sources.yml")
+    with open(sql_path, "w") as f:
+        f.write(result["sql_content"])
+    with open(schema_path, "w") as f:
+        f.write(result["schema_yaml"])
+
+    # Merge source YAML into existing file (don't overwrite — shared across models)
+    import yaml
+    new_sources = yaml.safe_load(result["source_yaml"]) or {}
+    if os.path.exists(source_path):
+        try:
+            with open(source_path, "r") as f:
+                existing = yaml.safe_load(f.read()) or {}
+            # Build a map of existing source name → source definition
+            existing_map = {}
+            for src in existing.get("sources", []):
+                existing_map[src["name"]] = src
+            # Merge new sources into existing
+            for src in new_sources.get("sources", []):
+                name = src["name"]
+                if name in existing_map:
+                    # Merge tables: add any new table names
+                    existing_tables = {t["name"] for t in existing_map[name].get("tables", [])}
+                    for t in src.get("tables", []):
+                        if t["name"] not in existing_tables:
+                            existing_map[name].setdefault("tables", []).append(t)
+                    # Preserve schema if set
+                    if "schema" in src and "schema" not in existing_map[name]:
+                        existing_map[name]["schema"] = src["schema"]
+                else:
+                    existing_map[name] = src
+            merged = {"version": 2, "sources": list(existing_map.values())}
+        except Exception:
+            merged = new_sources
+    else:
+        merged = new_sources
+        # Ensure version: 2 is present
+        if "version" not in merged:
+            merged = {"version": 2, **merged}
+
+    with open(source_path, "w") as f:
+        yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
+
+    steps = []
+
+    # Step 1: sqlfluff lint
+    try:
+        proc = subprocess.run(
+            [SQLFLUFF_BIN, "lint", sql_path],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        steps.append({
+            "name": "sqlfluff lint",
+            "passed": proc.returncode == 0,
+            "output": proc.stdout.strip() or proc.stderr.strip() or "OK",
+        })
+    except Exception as exc:
+        steps.append({"name": "sqlfluff lint", "passed": False, "output": str(exc)})
+
+    # Step 2: dbt compile (checks SQL is valid Jinja + SQL)
+    try:
+        proc = subprocess.run(
+            [DBT_BIN, "compile", "--profiles-dir", ".", "--select", model_name],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=60,
+        )
+        output = proc.stdout.strip()
+        # Extract just the summary line
+        summary = [l for l in output.split("\n") if "Finished" in l or "ERROR" in l or "PASS" in l]
+        steps.append({
+            "name": "dbt compile",
+            "passed": proc.returncode == 0,
+            "output": "\n".join(summary) if summary else output[-500:] if output else proc.stderr.strip()[-500:],
+        })
+    except Exception as exc:
+        steps.append({"name": "dbt compile", "passed": False, "output": str(exc)})
+
+    # Step 3: dbt run (actually executes the model against DuckDB)
+    try:
+        proc = subprocess.run(
+            [DBT_BIN, "run", "--profiles-dir", ".", "--select", model_name],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=60,
+        )
+        output = proc.stdout.strip()
+        summary = [l for l in output.split("\n") if "OK" in l or "ERROR" in l or "PASS" in l or "FAIL" in l or "Done" in l]
+        steps.append({
+            "name": "dbt run",
+            "passed": proc.returncode == 0,
+            "output": "\n".join(summary) if summary else output[-500:] if output else proc.stderr.strip()[-500:],
+        })
+    except Exception as exc:
+        steps.append({"name": "dbt run", "passed": False, "output": str(exc)})
+
+    # Step 4: dbt test (runs not_null/unique data quality tests)
+    try:
+        proc = subprocess.run(
+            [DBT_BIN, "test", "--profiles-dir", ".", "--select", model_name],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=60,
+        )
+        output = proc.stdout.strip()
+        summary = [l for l in output.split("\n") if "PASS" in l or "FAIL" in l or "ERROR" in l or "Done" in l or "Warn" in l]
+        steps.append({
+            "name": "dbt test",
+            "passed": proc.returncode == 0,
+            "output": "\n".join(summary) if summary else output[-500:] if output else proc.stderr.strip()[-500:],
+        })
+    except Exception as exc:
+        steps.append({"name": "dbt test", "passed": False, "output": str(exc)})
+
+    all_passed = all(s["passed"] for s in steps)
+    return {"label": label, "model_name": model_name, "steps": steps, "all_passed": all_passed}
+
+
+# ---------------------------------------------------------------------------
+# Validation Results Renderer
+# ---------------------------------------------------------------------------
+
+def _render_validation(val: dict):
+    """Render validation results as a styled step-by-step report."""
+    overall = "✅ All checks passed" if val["all_passed"] else "❌ Some checks failed"
+    badge_color = "#1B5E20" if val["all_passed"] else "#B71C1C"
+
+    st.markdown(
+        f'<div style="background: {badge_color}; border-radius: 8px; padding: 0.6rem 1rem; '
+        f'color: white; font-weight: 600; margin: 0.5rem 0;">'
+        f'{overall} — {val["label"]} ({val["model_name"]})</div>',
+        unsafe_allow_html=True,
+    )
+
+    for step in val["steps"]:
+        icon = "✅" if step["passed"] else "❌"
+        with st.expander(f'{icon} {step["name"]}', expanded=not step["passed"]):
+            st.code(step["output"], language="text")
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -505,6 +653,40 @@ if "conversion_result" in st.session_state:
                 mime="application/zip",
                 use_container_width=True,
             )
+
+        # --- Validate with dbt ---
+        st.markdown("")
+        st.markdown("---")
+        
+        
+        validate_clicked = st.button(
+            "🔍  Validate with dbt",
+            use_container_width=True,
+            help="Write generated files to disk and run: sqlfluff lint → dbt compile → dbt run → dbt test",
+        )
+
+        if validate_clicked:
+            has_llm = llm_result and llm_result.get("success") and llm_result.get("sql_content")
+
+            if has_llm:
+                # Side-by-side validation
+                col_val_det, col_val_llm = st.columns(2)
+                with col_val_det:
+                    with st.spinner("Validating deterministic output…"):
+                        val_det = validate_dbt_model(result, label="Deterministic")
+                    _render_validation(val_det)
+                with col_val_llm:
+                    with st.spinner("Validating LLM output…"):
+                        val_llm = validate_dbt_model(llm_result, label="LLM")
+                    _render_validation(val_llm)
+            else:
+                with st.spinner("Validating deterministic output…"):
+                    val_det = validate_dbt_model(result, label="Deterministic")
+                _render_validation(val_det)
+            
+            st.warning("⚠️ **Note:** For new/random Talend jobs, only `sqlfluff lint` and `dbt compile` are expected to pass. `dbt run` and `dbt test` will naturally fail because the required raw tables do not exist in the local database.")
+
+
     else:
         st.markdown(
             f'<div class="error-banner">❌ Conversion failed: {result["error"]}</div>',
