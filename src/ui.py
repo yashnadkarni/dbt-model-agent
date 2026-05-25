@@ -344,27 +344,45 @@ with tab_upload:
         st.session_state["upload_filename"] = uploaded.name
 
 # Convert Button
-col_btn, col_space = st.columns([1, 3])
+col_btn, col_refresh, col_space = st.columns([1, 1, 2])
 with col_btn:
     convert_clicked = st.button("🚀  Convert to dbt", type="primary", use_container_width=True)
-
-should_convert = convert_clicked
+with col_refresh:
+    if st.button("🔄 Refresh", use_container_width=True):
+        st.session_state.pop("conversion_result", None)
+        st.session_state.pop("llm_conversion_result", None)
 
 # ---------------------------------------------------------------------------
 # Conversion & Results
 # ---------------------------------------------------------------------------
-if should_convert and xml_text and xml_text.strip():
-    # Determine the best filename hint for meaningful model-name fallbacks
-    _filename_hint = st.session_state.pop("upload_filename", "job.item")
-    with st.spinner("Converting…"):
-        result = parse_and_convert(xml_text, original_filename=_filename_hint)
+if convert_clicked:
+    if not xml_text or not xml_text.strip():
+        st.warning("Please paste XML or upload a file first.")
+    else:
+        # Determine the best filename hint for meaningful model-name fallbacks
+        _filename_hint = st.session_state.pop("upload_filename", "job.item")
+        with st.spinner("Converting…"):
+            result = parse_and_convert(xml_text, original_filename=_filename_hint)
+            st.session_state["conversion_result"] = result
+            
+            # Clear previous LLM result
+            st.session_state.pop("llm_conversion_result", None)
+            
+            if use_llm and result["success"]:
+                with st.spinner("🤖 Running LLM agent…"):
+                    llm_result = convert_with_llm(result["parsed_dict"])
+                    st.session_state["llm_conversion_result"] = llm_result
+
+if "conversion_result" in st.session_state:
+    result = st.session_state["conversion_result"]
+    llm_result = st.session_state.get("llm_conversion_result")
 
     if result["success"]:
-        if use_llm:
+        if use_llm and llm_result:
             st.markdown(
                 f'<div class="success-banner">'
                 f'🔧 Deterministic conversion done → <code>{result["model_name"]}.sql</code>. '
-                f'<span class="mode-badge mode-llm">Now running LLM agent…</span>'
+                f'<span class="mode-badge mode-llm">LLM Agent run complete</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -411,11 +429,7 @@ if should_convert and xml_text and xml_text.strip():
         st.markdown("")
 
         # --- LLM Mode: side-by-side ---
-        llm_result = None
-        if use_llm:
-            with st.spinner("🤖 Running LLM agent…"):
-                llm_result = convert_with_llm(result["parsed_dict"])
-
+        if use_llm and llm_result:
             if llm_result["success"]:
                 st.markdown(
                     f'<div class="success-banner">'
@@ -496,5 +510,3 @@ if should_convert and xml_text and xml_text.strip():
             f'<div class="error-banner">❌ Conversion failed: {result["error"]}</div>',
             unsafe_allow_html=True,
         )
-elif should_convert:
-    st.warning("Please paste XML or upload a file first.")
