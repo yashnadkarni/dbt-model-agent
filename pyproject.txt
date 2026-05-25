@@ -1,3 +1,4 @@
+# Change to pyproject.toml
 [project]
 name = "dbt-model-agent"
 version = "0.2.0"
