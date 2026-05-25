@@ -1,4 +1,4 @@
-# CLAUDE.md — dbt-model-agent
+# Architecture & Development Guide
 
 ## Project Overview
 

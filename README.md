@@ -1,10 +1,10 @@
 # dbt Model Agent
 
-Convert Talend ETL jobs into production-ready dbt models — instantly, deterministically, with optional LLM enhancement.
+Convert Talend ETL jobs into production-ready dbt models deterministically with optional LLM enhancement. Check it out: https://talend-to-dbt.streamlit.app/
 
 ## What This Does
 
-Takes a Talend `.item` file (the XML export of a Talend job) and converts it into a complete set of dbt files:
+Takes a Talend job (.item file) and converts it into a complete set of dbt files:
 
 | Talend Component | dbt Equivalent |
 |---|---|
@@ -28,7 +28,7 @@ For each Talend job, the converter generates **3 files**:
 ### 1. Setup
 
 ```bash
-git clone <repo-url> && cd dbt-model-agent
+git clone https://github.com/yashnadkarni/dbt-model-agent.git && cd dbt-model-agent
 
 # Create virtual environment
 python3 -m venv venv
@@ -54,7 +54,7 @@ venv/bin/streamlit run src/ui.py
 
 Open **http://localhost:8501** in your browser.
 
-### 4. Demo It
+### 4. Sample Demo
 
 1. Click any sample job in the left sidebar (e.g., "Filter Active Customers")
 2. See the generated SQL, schema YAML, and source YAML instantly
@@ -66,38 +66,13 @@ Open **http://localhost:8501** in your browser.
 Run the full validation pipeline:
 
 ```bash
-# Unit tests (parser, converter, end-to-end)
-venv/bin/python -m pytest tests/ -v
-
-# Generate models from all 6 sample Talend jobs
-venv/bin/python -c "
-from dataclasses import asdict
-from src.parser import parse_talend_job
-from src.converter import TalendToDbtConverter, write_dbt_files
-import os, glob
-for f in sorted(glob.glob('fixtures/talend_jobs/*.item')):
-    parsed = asdict(parse_talend_job(f))
-    result = TalendToDbtConverter(parsed).convert(source_schema='main')
-    write_dbt_files(result)
-    print(f'  ✓ {os.path.basename(f):40s} → {result.model_name}.sql')
-"
-
-# Lint all generated SQL
-venv/bin/sqlfluff lint models/generated/
-
-# Compile all dbt models
-venv/bin/dbt compile --profiles-dir .
-
-# Run all models against DuckDB
-venv/bin/dbt run --profiles-dir .
-
-# Run data quality tests
-venv/bin/dbt test --profiles-dir .
+# Run the full validation pipeline (tests, parsing, conversion, sqlfluff linting, dbt compile/run/test)
+./validate.sh
 ```
 
 Expected results:
 - **pytest**: 56/56 tests pass
-- **sqlfluff**: "All Finished!" (no lint errors)
+- **sqlfluff**: "All Finished!"
 - **dbt run**: 6 models created, 0 errors
 - **dbt test**: 14 data tests pass, 0 failures
 
@@ -154,4 +129,4 @@ Endpoints:
 - `POST /generate_model` — LLM-based generation
 - `POST /validate_project` — Runs `dbt compile`
 
-> ⚠️ Do **not** use `uvicorn --reload` — the agent writes to `models/generated/` which triggers the file watcher in an infinite loop.
+> ⚠️ For FastAPI, do **not** use `uvicorn --reload` - the agent writes to `models/generated/` which triggers the file watcher in an infinite loop.

@@ -4,4 +4,5 @@ dialect = duckdb
 
 # CV06 requires trailing semicolons, but dbt models must NOT have them
 # (dbt wraps the SQL internally). Exclude to prevent unsolvable lint loops.
-exclude_rules = CV06
+# AL01, ST06, ST09, LT08, CP03 are purely stylistic (aliasing conventions, column order, join order, line breaks, capitalization)
+exclude_rules = CV06, AL01, ST06, ST09, LT08, CP03

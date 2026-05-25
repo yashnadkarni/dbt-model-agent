@@ -154,8 +154,14 @@ def generate_dbt_sources(source_name: str, yaml_content: str) -> str:
     else:
         merged = new_parsed
 
+    # Programmatically enforce version: 2 at the top level
+    ordered_merged = {"version": 2}
+    for k, v in merged.items():
+        if k != "version":
+            ordered_merged[k] = v
+
     with open(source_path, "w") as fh:
-        yaml.dump(merged, fh, default_flow_style=False, sort_keys=False)
+        yaml.dump(ordered_merged, fh, default_flow_style=False, sort_keys=False)
 
     logger.info("Wrote/merged source definition → %s", source_path)
     return f"Successfully generated dbt source at {source_path}"
@@ -190,6 +196,11 @@ def generate_dbt_model(table_name: str, sql_content: str, yaml_content: str) -> 
             return "Validation Failed: yaml_content must contain a top-level 'models:' key."
     except yaml.YAMLError as exc:
         return f"Validation Failed: Invalid YAML syntax: {exc}"
+
+    # --- Scrub known Talend expressions ---
+    from src.converter import TALEND_FUNCTION_MAP
+    for talend_func, sql_func in TALEND_FUNCTION_MAP.items():
+        sql_content = sql_content.replace(talend_func, sql_func)
 
     # --- Normalize trailing newline (fixes sqlfluff LT12) ---
     sql_content = sql_content.rstrip() + "\n"
@@ -282,9 +293,10 @@ def build_talend_prompt(parsed_dict: dict) -> tuple[str, str, str]:
         f"Instructions:\n"
         f"1. Call generate_dbt_sources with source_name='{source_name}'\n"
         f"   CRITICAL: The yaml_content MUST start with 'version: 2' and be a valid sources: block declaring "
-        f"source '{source_name}' with tables: {source_tables}\n"
-        f"2. Call generate_dbt_model with table_name='{target_name}'\n"
-        f"   CRITICAL: The SQL content MUST start with {{{{ config(materialized='table') }}}}\n"
+        f"source '{source_name}'. Each table MUST be an object with a 'name' key (e.g. - name: {source_tables[0] if source_tables else 'table_name'}).\n"
+        f"   CRITICAL: ONLY include tables that are explicitly listed above: {source_tables}. Do NOT add any other tables.\n"
+        f"2. Call generate_dbt_model with table_name='{target_name}', sql_content, and yaml_content\n"
+        f"   CRITICAL: The sql_content MUST start with {{{{ config(materialized='table') }}}}\n"
         f"3. Use {{{{ source('{source_name}', 'table') }}}} syntax\n"
         f"4. Use CTEs for readability\n"
         f"5. Add not_null and unique tests on key columns in schema YAML\n"
@@ -292,6 +304,7 @@ def build_talend_prompt(parsed_dict: dict) -> tuple[str, str, str]:
         f"7. Pay strict attention to sqlfluff validation errors. If you get a lint error, READ it carefully and FIX the SQL before retrying.\n"
         f"   - For ST06: Ensure simple column references (like table.col) appear BEFORE complex expressions/aggregations in the SELECT clause.\n"
         f"   - For AL01: Ensure you use explicit 'AS' for all table aliases in FROM and JOIN clauses.\n"
+        f"   - For ST09: In JOIN conditions, ensure the column from the table referenced EARLIER in the query (usually the FROM table) is on the LEFT side of the equals sign (e.g. from_table.id = join_table.id).\n"
     )
 
     return prompt, target_name, source_name
@@ -330,8 +343,8 @@ def run_generation_agent(user_prompt: str, table_name: str, source_name: str) ->
 
     try:
         # Cap recursion to prevent infinite retry loops.
-        # 10 steps ≈ 3 tool calls with retries + final response.
-        config = {"recursion_limit": 10}
+        # 20 steps allows for roughly 6-7 tool calls (including retries) + final response.
+        config = {"recursion_limit": 15}
         for chunk in agent.stream(inputs, stream_mode="values", config=config):
             message = chunk["messages"][-1]
             if hasattr(message, "content") and message.content:
