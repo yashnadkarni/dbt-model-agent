@@ -339,37 +339,37 @@ def validate_dbt_model(result: dict, label: str = "Deterministic") -> dict:
     except Exception as exc:
         steps.append({"name": "dbt compile", "passed": False, "output": str(exc)})
 
-    # Step 3: dbt run (actually executes the model against DuckDB)
-    try:
-        proc = subprocess.run(
-            [DBT_BIN, "run", "--profiles-dir", ".", "--select", model_name],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=60,
-        )
-        output = proc.stdout.strip()
-        summary = [l for l in output.split("\n") if "OK" in l or "ERROR" in l or "PASS" in l or "FAIL" in l or "Done" in l]
-        steps.append({
-            "name": "dbt run",
-            "passed": proc.returncode == 0,
-            "output": "\n".join(summary) if summary else output[-500:] if output else proc.stderr.strip()[-500:],
-        })
-    except Exception as exc:
-        steps.append({"name": "dbt run", "passed": False, "output": str(exc)})
+    # # Step 3: dbt run (actually executes the model against DuckDB)
+    # try:
+    #     proc = subprocess.run(
+    #         [DBT_BIN, "run", "--profiles-dir", ".", "--select", model_name],
+    #         cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=60,
+    #     )
+    #     output = proc.stdout.strip()
+    #     summary = [l for l in output.split("\n") if "OK" in l or "ERROR" in l or "PASS" in l or "FAIL" in l or "Done" in l]
+    #     steps.append({
+    #         "name": "dbt run",
+    #         "passed": proc.returncode == 0,
+    #         "output": "\n".join(summary) if summary else output[-500:] if output else proc.stderr.strip()[-500:],
+    #     })
+    # except Exception as exc:
+    #     steps.append({"name": "dbt run", "passed": False, "output": str(exc)})
 
-    # Step 4: dbt test (runs not_null/unique data quality tests)
-    try:
-        proc = subprocess.run(
-            [DBT_BIN, "test", "--profiles-dir", ".", "--select", model_name],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=60,
-        )
-        output = proc.stdout.strip()
-        summary = [l for l in output.split("\n") if "PASS" in l or "FAIL" in l or "ERROR" in l or "Done" in l or "Warn" in l]
-        steps.append({
-            "name": "dbt test",
-            "passed": proc.returncode == 0,
-            "output": "\n".join(summary) if summary else output[-500:] if output else proc.stderr.strip()[-500:],
-        })
-    except Exception as exc:
-        steps.append({"name": "dbt test", "passed": False, "output": str(exc)})
+    # # Step 4: dbt test (runs not_null/unique data quality tests)
+    # try:
+    #     proc = subprocess.run(
+    #         [DBT_BIN, "test", "--profiles-dir", ".", "--select", model_name],
+    #         cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=60,
+    #     )
+    #     output = proc.stdout.strip()
+    #     summary = [l for l in output.split("\n") if "PASS" in l or "FAIL" in l or "ERROR" in l or "Done" in l or "Warn" in l]
+    #     steps.append({
+    #         "name": "dbt test",
+    #         "passed": proc.returncode == 0,
+    #         "output": "\n".join(summary) if summary else output[-500:] if output else proc.stderr.strip()[-500:],
+    #     })
+    # except Exception as exc:
+    #     steps.append({"name": "dbt test", "passed": False, "output": str(exc)})
 
     all_passed = all(s["passed"] for s in steps)
     return {"label": label, "model_name": model_name, "steps": steps, "all_passed": all_passed}
@@ -381,7 +381,7 @@ def validate_dbt_model(result: dict, label: str = "Deterministic") -> dict:
 
 def _render_validation(val: dict):
     """Render validation results as a styled step-by-step report."""
-    overall = "✅ All checks passed" if val["all_passed"] else "❌ Some checks failed"
+    overall = "✅ All checks passed" if val["all_passed"] else "❌ Check failed"
     badge_color = "#1B5E20" if val["all_passed"] else "#B71C1C"
 
     st.markdown(
@@ -661,6 +661,7 @@ if "conversion_result" in st.session_state:
         
         validate_clicked = st.button(
             "🔍  Validate with dbt",
+            type = "primary",
             use_container_width=True,
             help="Write generated files to disk and run: sqlfluff lint → dbt compile → dbt run → dbt test",
         )
@@ -684,7 +685,7 @@ if "conversion_result" in st.session_state:
                     val_det = validate_dbt_model(result, label="Deterministic")
                 _render_validation(val_det)
             
-            st.warning("⚠️ **Note:** For new/random Talend jobs, only `sqlfluff lint` and `dbt compile` are expected to pass. `dbt run` and `dbt test` will naturally fail because the required raw tables do not exist in the local database.")
+            st.warning("⚠️ **Note:** Only `sqlfluff lint` and `dbt compile` are expected to pass. `dbt run` and `dbt test` need to be tested after connecting to your database.")
 
 
     else:
