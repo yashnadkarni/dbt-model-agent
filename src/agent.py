@@ -281,14 +281,17 @@ def build_talend_prompt(parsed_dict: dict) -> tuple[str, str, str]:
         f"Transformations:\n" + "\n".join(f"  - {t}" for t in transforms_desc) + "\n\n"
         f"Instructions:\n"
         f"1. Call generate_dbt_sources with source_name='{source_name}'\n"
-        f"   The yaml_content must be a valid sources: block declaring "
+        f"   CRITICAL: The yaml_content MUST start with 'version: 2' and be a valid sources: block declaring "
         f"source '{source_name}' with tables: {source_tables}\n"
         f"2. Call generate_dbt_model with table_name='{target_name}'\n"
+        f"   CRITICAL: The SQL content MUST start with {{{{ config(materialized='table') }}}}\n"
         f"3. Use {{{{ source('{source_name}', 'table') }}}} syntax\n"
         f"4. Use CTEs for readability\n"
         f"5. Add not_null and unique tests on key columns in schema YAML\n"
-        f"6. If the tool returns a validation error, fix the SQL and retry.\n"
-        f"7. Make sure the SQL file ends with a single trailing newline.\n"
+        f"6. Make sure the SQL file ends with a single trailing newline.\n"
+        f"7. Pay strict attention to sqlfluff validation errors. If you get a lint error, READ it carefully and FIX the SQL before retrying.\n"
+        f"   - For ST06: Ensure simple column references (like table.col) appear BEFORE complex expressions/aggregations in the SELECT clause.\n"
+        f"   - For AL01: Ensure you use explicit 'AS' for all table aliases in FROM and JOIN clauses.\n"
     )
 
     return prompt, target_name, source_name
