@@ -497,20 +497,20 @@ with st.sidebar:
     elif selected_adapter == "snowflake":
         st.caption("Enter your Snowflake credentials. These are stored only in session memory.")
 
-        if st.button("📂 Load from .env", use_container_width=True, key="sf_load_env"):
-            try:
-                from dotenv import load_dotenv
-                load_dotenv(override=True)
-            except ImportError:
-                pass
-            st.session_state["sf_account"] = os.environ.get("SNOWFLAKE_ACCOUNT", "")
-            st.session_state["sf_user"] = os.environ.get("SNOWFLAKE_USER", "")
-            st.session_state["sf_password"] = os.environ.get("SNOWFLAKE_PASSWORD", "")
-            st.session_state["sf_role"] = os.environ.get("SNOWFLAKE_ROLE", "")
-            st.session_state["sf_warehouse"] = os.environ.get("SNOWFLAKE_WAREHOUSE", "")
-            st.session_state["sf_database"] = os.environ.get("SNOWFLAKE_DATABASE", "")
-            st.session_state["sf_schema"] = os.environ.get("SNOWFLAKE_SCHEMA", "")
-            st.rerun()
+        # if st.button("📂 Load from .env", use_container_width=True, key="sf_load_env"):
+        #     try:
+        #         from dotenv import load_dotenv
+        #         load_dotenv(override=True)
+        #     except ImportError:
+        #         pass
+        #     st.session_state["sf_account"] = os.environ.get("SNOWFLAKE_ACCOUNT", "")
+        #     st.session_state["sf_user"] = os.environ.get("SNOWFLAKE_USER", "")
+        #     st.session_state["sf_password"] = os.environ.get("SNOWFLAKE_PASSWORD", "")
+        #     st.session_state["sf_role"] = os.environ.get("SNOWFLAKE_ROLE", "")
+        #     st.session_state["sf_warehouse"] = os.environ.get("SNOWFLAKE_WAREHOUSE", "")
+        #     st.session_state["sf_database"] = os.environ.get("SNOWFLAKE_DATABASE", "")
+        #     st.session_state["sf_schema"] = os.environ.get("SNOWFLAKE_SCHEMA", "")
+        #     st.rerun()
 
         sf_account = st.text_input("Account", placeholder="ORGNAME-ACCOUNTNAME", key="sf_account")
         sf_user = st.text_input("User", key="sf_user")
@@ -550,18 +550,18 @@ with st.sidebar:
     elif selected_adapter == "databricks":
         st.caption("Enter your Databricks credentials. These are stored only in session memory.")
 
-        if st.button("📂 Load from .env", use_container_width=True, key="db_load_env"):
-            try:
-                from dotenv import load_dotenv
-                load_dotenv(override=True)
-            except ImportError:
-                pass
-            st.session_state["db_host"] = os.environ.get("DATABRICKS_HOST", "")
-            st.session_state["db_token"] = os.environ.get("DATABRICKS_TOKEN", "")
-            st.session_state["db_http_path"] = os.environ.get("DATABRICKS_HTTP_PATH", "")
-            st.session_state["db_catalog"] = os.environ.get("DATABRICKS_CATALOG", "")
-            st.session_state["db_schema"] = os.environ.get("DATABRICKS_SCHEMA", "")
-            st.rerun()
+        # if st.button("📂 Load from .env", use_container_width=True, key="db_load_env"):
+        #     try:
+        #         from dotenv import load_dotenv
+        #         load_dotenv(override=True)
+        #     except ImportError:
+        #         pass
+        #     st.session_state["db_host"] = os.environ.get("DATABRICKS_HOST", "")
+        #     st.session_state["db_token"] = os.environ.get("DATABRICKS_TOKEN", "")
+        #     st.session_state["db_http_path"] = os.environ.get("DATABRICKS_HTTP_PATH", "")
+        #     st.session_state["db_catalog"] = os.environ.get("DATABRICKS_CATALOG", "")
+        #     st.session_state["db_schema"] = os.environ.get("DATABRICKS_SCHEMA", "")
+        #     st.rerun()
 
         db_host = st.text_input("Host", placeholder="dbc-xxxxx.cloud.databricks.com", key="db_host")
         db_token = st.text_input("Token (PAT)", type="password", key="db_token")
