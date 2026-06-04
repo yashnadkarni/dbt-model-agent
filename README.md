@@ -1,6 +1,6 @@
 # dbt Model Agent
 
-Convert Talend ETL jobs into production-ready dbt models deterministically with optional LLM enhancement. Check it out: https://talend-to-dbt.streamlit.app/
+Convert Talend ETL jobs into production-ready dbt models deterministically with optional LLM enhancement. Deploy to **DuckDB** (local), **Snowflake**, or **Databricks**. Check it out: https://talend-to-dbt.streamlit.app/
 
 ## What This Does
 
@@ -73,7 +73,7 @@ Run the full validation pipeline:
 ```
 
 Expected results:
-- **pytest**: 56/56 tests pass
+- **pytest**: 120+ tests pass
 - **sqlfluff**: "All Finished!"
 - **dbt run**: 6 models created, 0 errors
 - **dbt test**: 14 data tests pass, 0 failures
@@ -85,7 +85,8 @@ dbt-model-agent/
 ├── src/
 │   ├── __init__.py          # Centralized path config
 │   ├── parser.py            # Talend XML parser → TalendJob dataclass
-│   ├── converter.py         # TalendJob → dbt SQL/YAML converter
+│   ├── converter.py         # TalendJob → dbt SQL/YAML converter (dialect-aware)
+│   ├── connections.py       # Connection manager (DuckDB, Snowflake)
 │   ├── agent.py             # FastAPI + LangGraph AI agent (optional)
 │   └── ui.py                # Streamlit UI (main entry point)
 ├── fixtures/
@@ -98,7 +99,7 @@ dbt-model-agent/
 │   └── generated/           # Output: generated dbt models go here
 ├── tests/                   # pytest test suite
 ├── dbt_project.yml          # dbt project config
-├── profiles.yml             # dbt connection config (DuckDB)
+├── profiles.yml             # dbt connection config (DuckDB default)
 └── .sqlfluff                # SQL linter config
 ```
 
@@ -132,3 +133,121 @@ Endpoints:
 - `POST /validate_project` — Runs `dbt compile`
 
 > ⚠️ For FastAPI, do **not** use `uvicorn --reload` - the agent writes to `models/generated/` which triggers the file watcher in an infinite loop.
+
+## Snowflake Deployment
+
+### Prerequisites
+- A Snowflake account (sign up at [snowflake.com](https://snowflake.com) → choose **AI Data Cloud for Enterprise**)
+- `dbt-snowflake` adapter: `pip install dbt-snowflake`
+- `snowflake-connector-python`: `pip install snowflake-connector-python`
+
+### 1. Snowflake Setup (One-Time)
+
+In your Snowflake account, run these SQL commands to create the required objects:
+
+```sql
+-- Create a warehouse for dbt transformations
+CREATE WAREHOUSE IF NOT EXISTS TRANSFORM_WH
+  WAREHOUSE_SIZE = 'X-SMALL'
+  AUTO_SUSPEND = 60
+  AUTO_RESUME = TRUE;
+
+-- Create a database and schema
+CREATE DATABASE IF NOT EXISTS ANALYTICS;
+CREATE SCHEMA IF NOT EXISTS ANALYTICS.DBT_DEV;
+
+-- Create a role (optional but recommended)
+CREATE ROLE IF NOT EXISTS TRANSFORM_ROLE;
+GRANT USAGE ON WAREHOUSE TRANSFORM_WH TO ROLE TRANSFORM_ROLE;
+GRANT ALL ON DATABASE ANALYTICS TO ROLE TRANSFORM_ROLE;
+GRANT ALL ON SCHEMA ANALYTICS.DBT_DEV TO ROLE TRANSFORM_ROLE;
+GRANT ROLE TRANSFORM_ROLE TO USER your_username;
+```
+
+### 2. Configure Credentials
+
+Add your Snowflake credentials to `.env`:
+
+```bash
+SNOWFLAKE_ACCOUNT=ORGNAME-ACCOUNTNAME
+SNOWFLAKE_USER=your-username
+SNOWFLAKE_PASSWORD=your-password
+SNOWFLAKE_ROLE=TRANSFORM_ROLE
+SNOWFLAKE_WAREHOUSE=TRANSFORM_WH
+SNOWFLAKE_DATABASE=ANALYTICS
+SNOWFLAKE_SCHEMA=DBT_DEV
+```
+
+> 💡 Your Snowflake account identifier is in one of two formats:
+> - **Modern (org-based):** `ORGNAME-ACCOUNTNAME` (e.g., `TDDRXUV-HN35889`) — found in your Snowflake URL as `https://app.snowflake.com/TDDRXUV/HN35889`
+> - **Legacy (locator):** `xy12345.us-east-1` — the part before `.snowflakecomputing.com` in the older URL format
+
+### 3. Deploy via the UI
+
+1. Run the Streamlit app: `venv/bin/streamlit run src/ui.py`
+2. In the sidebar under **❄️ Warehouse Connection**, select **Snowflake**
+3. Enter your credentials and click **🔌 Test Connection**
+4. Convert a Talend job as usual
+5. Click **🚀 Deploy to Snowflake** to run `dbt run` + `dbt test` against your warehouse
+
+> ⚠️ For Snowflake deployment, your source tables must already exist in the target database/schema. The seed data (raw_customers, raw_orders, raw_payments) can be loaded via `dbt seed` after switching the profile.
+
+### 4. Deploy via CLI (Alternative)
+
+You can also generate a Snowflake profiles.yml from Python:
+
+```python
+from src.connections import ConnectionConfig, ConnectionManager
+
+config = ConnectionConfig.from_env("snowflake")
+mgr = ConnectionManager(config)
+mgr.write_profiles_yml()  # writes profiles.yml to project root
+
+# Then run dbt commands as usual:
+# dbt seed --profiles-dir .
+# dbt run --profiles-dir .
+# dbt test --profiles-dir .
+```
+
+## Databricks Deployment
+
+### Prerequisites
+- A Databricks workspace (sign up at [databricks.com/try](https://www.databricks.com/try-databricks) → choose **Personal / Community Edition** to start free)
+- `dbt-databricks` adapter: `pip install dbt-databricks`
+- `databricks-sql-connector`: `pip install databricks-sql-connector`
+
+### 1. Databricks Setup (One-Time)
+
+1. **Create a SQL Warehouse**:
+   - Go to your Databricks workspace → SQL Warehouses → Create SQL Warehouse
+   - Choose "Serverless" or "Pro" (smallest size is fine)
+   - Note the **HTTP Path** from the Connection Details tab
+
+2. **Generate a Personal Access Token (PAT)**:
+   - Settings → Developer → Access Tokens → Generate New Token
+   - Give it a name (e.g., "dbt-agent") and copy the token
+
+3. **Note down your workspace host**:
+   - This is the URL of your workspace, e.g., `dbc-xxxxx.cloud.databricks.com`
+
+### 2. Configure Credentials
+
+Add your Databricks credentials to `.env`:
+
+```bash
+DATABRICKS_HOST=dbc-xxxxx.cloud.databricks.com
+DATABRICKS_TOKEN=dapi-your-personal-access-token
+DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/abcdef123456
+DATABRICKS_CATALOG=hive_metastore
+DATABRICKS_SCHEMA=default
+```
+
+> 💡 `DATABRICKS_CATALOG` is optional. If omitted, Databricks defaults to `hive_metastore`. If your workspace uses Unity Catalog, set it to your catalog name.
+
+### 3. Deploy via the UI
+
+1. Run the Streamlit app: `venv/bin/streamlit run src/ui.py`
+2. In the sidebar under **❄️ Warehouse Connection**, select **Databricks**
+3. Enter your credentials (or click **📂 Load from .env**) and click **🔌 Test Connection**
+4. Convert a Talend job as usual
+5. Click **🚀 Deploy to Databricks** to run `dbt seed + dbt run + dbt test`

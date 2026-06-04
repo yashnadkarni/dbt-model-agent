@@ -47,9 +47,25 @@ TALEND_FUNCTION_MAP = {
     "StringHandling.RIGHT":     "RIGHT",
     "StringHandling.LEN":       "LENGTH",
     "StringHandling.SUBSTR":    "SUBSTR",
-    "TalendDate.formatDate":    "STRFTIME",   # DuckDB-specific
+    "TalendDate.formatDate":    "STRFTIME",   # DuckDB-specific; Snowflake uses TO_CHAR
     "TalendDate.getCurrentDate": "CURRENT_DATE",
 }
+
+
+def get_function_map(dialect: str = "duckdb") -> dict:
+    """
+    Return the Talend → SQL function map with dialect-specific overrides.
+
+    For DuckDB (default), returns TALEND_FUNCTION_MAP as-is.
+    For Snowflake, overrides date functions (STRFTIME → TO_CHAR, etc.).
+    """
+    from src.connections import DIALECT_FUNCTION_OVERRIDES
+    base = dict(TALEND_FUNCTION_MAP)
+    overrides = DIALECT_FUNCTION_OVERRIDES.get(dialect, {})
+    for talend_key, sql_func in overrides.items():
+        if talend_key in base:
+            base[talend_key] = sql_func
+    return base
 
 # Talend filter operators → SQL operators
 TALEND_OPERATOR_MAP = {
@@ -96,7 +112,7 @@ def derive_alias(table_name: str) -> str:
     return table_name
 
 
-def translate_expression(expr: str, row_to_alias: dict) -> str:
+def translate_expression(expr: str, row_to_alias: dict, dialect: str = "duckdb") -> str:
     """
     Translate a Talend Java expression to SQL.
 
@@ -105,13 +121,18 @@ def translate_expression(expr: str, row_to_alias: dict) -> str:
       - Function calls:    StringHandling.UPCASE(row1.col) → UPPER(alias.col)
       - String concat:     row1.a + " " + row2.b → alias1.a || ' ' || alias2.b
       - Math expressions:  row1.amount / 100.0   → alias.amount / 100.0
+
+    Args:
+        dialect: SQL dialect ("duckdb" or "snowflake") for function translation.
     """
     result = expr
 
     # Step 1: Translate Talend functions to SQL equivalents
+    # Use dialect-aware function map
+    func_map = get_function_map(dialect)
     # We sort by length (longest first) to avoid partial replacements
     for talend_func, sql_func in sorted(
-        TALEND_FUNCTION_MAP.items(), key=lambda x: -len(x[0])
+        func_map.items(), key=lambda x: -len(x[0])
     ):
         result = result.replace(talend_func, sql_func)
 
@@ -186,10 +207,17 @@ class TalendToDbtConverter:
       2. Translate all expressions from Java to SQL
       3. Generate CTE-based dbt SQL with {{ source() }} macros
       4. Generate schema YAML with auto-detected tests
+
+    Args:
+        parsed_job: Dict from parser.parse_talend_job() via asdict().
+        dialect: SQL dialect for expression translation ("duckdb" or "snowflake").
+                 Defaults to "duckdb". This affects function translations
+                 (e.g., STRFTIME vs TO_CHAR) and sqlfluff lint dialect.
     """
 
-    def __init__(self, parsed_job: dict):
+    def __init__(self, parsed_job: dict, dialect: str = "duckdb"):
         self.job = parsed_job
+        self.dialect = dialect
         self.row_to_source: dict[str, dict] = {}   # row label → source table info
         self.row_to_alias: dict[str, str] = {}      # row label → SQL alias
         self.warnings: list[str] = []
@@ -287,7 +315,7 @@ class TalendToDbtConverter:
         complex_cols = []  # expressions: math, functions, concat
 
         for mapping in tmap.get("column_mappings", []):
-            expr = translate_expression(mapping["expression"], self.row_to_alias)
+            expr = translate_expression(mapping["expression"], self.row_to_alias, dialect=self.dialect)
             out_col = mapping["output_column"]
 
             # Determine if this is a "simple" reference (just alias.column)
@@ -327,7 +355,7 @@ class TalendToDbtConverter:
             join_type = join["join_type"]
             lookup_alias = self.row_to_alias.get(join["lookup_table"], join["lookup_table"])
             join_col = join["join_column"]
-            join_expr = translate_expression(join["join_expression"], self.row_to_alias)
+            join_expr = translate_expression(join["join_expression"], self.row_to_alias, dialect=self.dialect)
 
             # ST09: FROM-table column on the left, lookup column on the right
             join_clauses.append(
@@ -717,11 +745,17 @@ def write_dbt_files(result: ConversionResult, output_dir: str = GENERATED_MODELS
 # Validation
 # ---------------------------------------------------------------------------
 
-def validate_sql(sql_path: str) -> dict:
-    """Run sqlfluff lint on a generated SQL file."""
+def validate_sql(sql_path: str, dialect: str = "duckdb") -> dict:
+    """
+    Run sqlfluff lint on a generated SQL file.
+
+    Args:
+        sql_path: Path to the .sql file to lint.
+        dialect: SQL dialect for sqlfluff ("duckdb" or "snowflake").
+    """
     try:
         result = subprocess.run(
-            [SQLFLUFF_BIN, "lint", "--dialect", "duckdb", sql_path],
+            [SQLFLUFF_BIN, "lint", "--dialect", dialect, sql_path],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
