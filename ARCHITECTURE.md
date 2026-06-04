@@ -43,7 +43,8 @@ venv/bin/dbt test --profiles-dir .
 src/
 ├── __init__.py       # Centralized path config (PROJECT_ROOT, GENERATED_MODELS_DIR, etc.)
 ├── parser.py         # Talend XML parser → structured TalendJob dataclass
-├── converter.py      # Deterministic TalendJob → dbt SQL/YAML converter
+├── converter.py      # Deterministic TalendJob → dbt SQL/YAML converter (dialect-aware)
+├── connections.py    # Connection manager (DuckDB, Snowflake) + dynamic profiles.yml
 ├── agent.py          # FastAPI server + LangGraph ReAct agent + tool definitions
 └── ui.py             # Streamlit UI (calls parser+converter directly, agent.py for LLM mode)
 ```
@@ -115,6 +116,15 @@ Talend XML → parser (same) → parsed_dict → ui.convert_with_llm()
 
 ```
 OPENAI_API_KEY=sk-...    # Required only for LLM mode / Phase 1 agent
+
+# Snowflake (required only for Snowflake deployment)
+SNOWFLAKE_ACCOUNT=...    # e.g. xy12345.us-east-1
+SNOWFLAKE_USER=...
+SNOWFLAKE_PASSWORD=...
+SNOWFLAKE_ROLE=...        # optional
+SNOWFLAKE_WAREHOUSE=...
+SNOWFLAKE_DATABASE=...
+SNOWFLAKE_SCHEMA=...
 ```
 
 ## File Output Location
@@ -134,10 +144,11 @@ models/generated/
 venv/bin/python -m pytest tests/ -v
 
 # Test structure:
-# tests/conftest.py      — Shared fixtures loading all 6 sample Talend jobs
-# tests/test_parser.py   — Parser extraction correctness
-# tests/test_converter.py — SQL generation patterns (WHERE, JOIN, GROUP BY, etc.)
-# tests/test_e2e.py       — Full pipeline: parse → convert → write → sqlfluff lint
+# tests/conftest.py          — Shared fixtures loading all 6 sample Talend jobs
+# tests/test_parser.py       — Parser extraction correctness
+# tests/test_converter.py    — SQL generation patterns (WHERE, JOIN, GROUP BY, etc.)
+# tests/test_connections.py  — Connection config, profiles, dialect maps, Snowflake (mocked)
+# tests/test_e2e.py          — Full pipeline: parse → convert → write → sqlfluff lint
 ```
 
 ## Coding Conventions
@@ -157,4 +168,16 @@ venv/bin/python -m pytest tests/ -v
 - sqlfluff rule ST09 requires FROM-table column on LEFT side of JOIN ON condition
 - sqlfluff rule RF02 requires qualified column names when multiple tables are in scope
 - DuckDB seeds land in the `main` schema — `converter.convert(source_schema='main')` adds `schema: main` to source YAML
+- For Snowflake, the schema comes from `ConnectionConfig.source_schema` (user-configured)
 - All dbt commands need `--profiles-dir .` since `profiles.yml` is in the project root
+- After Snowflake deployment, `profiles.yml` is automatically restored to DuckDB defaults
+
+## Module Details (cont.)
+
+### `connections.py`
+- `ConnectionConfig` dataclass: adapter type + credentials for DuckDB/Snowflake
+- `ConnectionConfig.from_env()`: builds config from environment variables
+- `ConnectionConfig.validate()`: checks required fields for the chosen adapter
+- `ConnectionManager`: generates `profiles.yml`, tests connections
+- `DIALECT_FUNCTION_OVERRIDES`: adapter-specific SQL function translations (e.g., `STRFTIME` → `TO_CHAR` for Snowflake)
+- `SQLFLUFF_DIALECT_MAP`: maps adapter names to sqlfluff dialect strings

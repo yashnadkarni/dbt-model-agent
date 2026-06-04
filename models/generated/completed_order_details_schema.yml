@@ -2,7 +2,7 @@ version: 2
 
 models:
 - name: completed_order_details
-  description: 'dbt model converted from Talend job: 05_join_with_filter.item'
+  description: 'dbt model converted from Talend job: job.item'
   columns:
   - name: order_id
     description: Column order_id
