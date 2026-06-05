@@ -251,3 +251,40 @@ DATABRICKS_SCHEMA=default
 3. Enter your credentials (or click **📂 Load from .env**) and click **🔌 Test Connection**
 4. Convert a Talend job as usual
 5. Click **🚀 Deploy to Databricks** to run `dbt seed + dbt run + dbt test`
+
+## GitHub Integration (Push to GitHub / Create PR)
+
+### Prerequisites
+- A GitHub account with access to the target repository
+- A **Personal Access Token (PAT)** with `repo` scope
+- `PyGithub`: `pip install PyGithub`
+
+### 1. Create a GitHub PAT (One-Time)
+
+1. Go to [GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)](https://github.com/settings/tokens)
+2. Click **Generate new token (classic)**
+3. Give it a name (e.g., "dbt-model-agent")
+4. Select the `repo` scope (full control of private repositories)
+5. Click **Generate token** and copy it
+
+### 2. Configure Credentials
+
+Add to your `.env` file:
+
+```bash
+GITHUB_TOKEN=ghp_your-personal-access-token
+GITHUB_REPO=owner/repo-name
+```
+
+### 3. Use via the UI
+
+1. Run the Streamlit app: `venv/bin/streamlit run src/ui.py`
+2. In the sidebar under **🐙 GitHub Integration**, enter your token and repository
+3. Click **🔌 Test GitHub Connection**
+4. Convert a Talend job as usual
+5. Scroll down to **🐙 Push to GitHub** and click **🚀 Create Pull Request**
+
+This will:
+- Create a new branch: `dbt/migrate-<model_name>-<timestamp>`
+- Commit the SQL model, schema YAML, and source YAML
+- Open a Pull Request with validation results in the description

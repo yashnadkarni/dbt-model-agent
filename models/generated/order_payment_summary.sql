@@ -1,31 +1,29 @@
 {{ config(materialized='table') }}
 
-WITH orders AS (
-    SELECT * FROM {{ source('jaffle_shop', 'raw_orders') }}
+with orders as (
+    select
+        id as order_id,
+        user_id,
+        status as order_status
+    from {{ source('jaffle_shop', 'raw_orders') }}
 ),
-
-payments AS (
-    SELECT * FROM {{ source('jaffle_shop', 'raw_payments') }}
-)
-,
-
-transformed AS (
-    SELECT
-        orders.id AS order_id,
-        orders.user_id,
-        orders.status AS order_status,
-        UPPER(payments.payment_method) AS payment_method,
-        payments.amount / 100.0 AS payment_amount
-    FROM orders
-    INNER JOIN payments
-        ON orders.id = payments.order_id
+payments as (
+    select
+        order_id,
+        UPPER(payment_method) as payment_method,
+        amount / 100.0 as payment_amount
+    from {{ source('jaffle_shop', 'raw_payments') }}
 )
 
-SELECT
-    order_id,
-    user_id,
-    order_status,
-    SUM(payment_amount) AS total_paid,
-    COUNT(payment_amount) AS num_payments
-FROM transformed
-GROUP BY order_id, user_id, order_status
+select
+    o.order_id,
+    o.user_id,
+    o.order_status,
+    sum(p.payment_amount) as total_paid,
+    count(p.payment_amount) as num_payments
+from orders o
+inner join payments p on o.order_id = p.order_id
+group by
+    o.order_id,
+    o.user_id,
+    o.order_status
