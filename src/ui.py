@@ -595,6 +595,45 @@ with st.sidebar:
                     st.session_state["warehouse_connected"] = False
 
     st.markdown("---")
+
+    # --- GitHub Integration ---
+    st.markdown("### 🐙 GitHub Integration")
+    st.caption("Connect to a repo to push dbt models as Pull Requests.")
+
+    from src.github_connector import GitHubConfig, GitHubConnector
+
+    gh_token = st.text_input("GitHub Token (PAT)", type="password", key="gh_token",
+                              placeholder="ghp_xxxxxxxxxxxx")
+    gh_repo = st.text_input("Repository", key="gh_repo",
+                             placeholder="owner/repo")
+    gh_base = st.text_input("Base Branch", key="gh_base", value="main",
+                             placeholder="main")
+
+    gh_config = GitHubConfig(
+        token=gh_token,
+        repo_full_name=gh_repo,
+        base_branch=gh_base or "main",
+    )
+    st.session_state["github_config"] = gh_config
+
+    if st.button("🔌 Test GitHub Connection", use_container_width=True, key="gh_test"):
+        missing = gh_config.validate()
+        if missing:
+            st.error(f"Missing fields: {', '.join(missing)}")
+        else:
+            with st.spinner("Connecting to GitHub…"):
+                gh_connector = GitHubConnector(gh_config)
+                result = gh_connector.test_connection()
+            if result["success"]:
+                st.success(f"✓ {result['message']}")
+                st.session_state["github_connected"] = True
+                if result.get("details"):
+                    st.caption(f"Default branch: `{result['details'].get('default_branch', 'main')}`")
+            else:
+                st.error(f"✗ {result['message']}")
+                st.session_state["github_connected"] = False
+
+    st.markdown("---")
     st.caption("Built with LangGraph, FastAPI, DuckDB")
     st.caption("[GitHub](https://github.com/yashnadkarni/dbt-model-agent)")
 
@@ -823,10 +862,13 @@ if "conversion_result" in st.session_state:
                     with st.spinner("Validating LLM output…"):
                         val_llm = validate_dbt_model(llm_result, label="LLM", dialect=dialect)
                     _render_validation(val_llm)
+                # Store deterministic results for GitHub PR
+                st.session_state["last_validation_results"] = val_det
             else:
                 with st.spinner("Validating deterministic output…"):
                     val_det = validate_dbt_model(result, label="Deterministic", dialect=dialect)
                 _render_validation(val_det)
+                st.session_state["last_validation_results"] = val_det
             
             st.warning("⚠️ **Note:** Only `sqlfluff lint` and `dbt compile` are expected to pass. `dbt run` and `dbt test` need to be tested after connecting to your database.")
 
@@ -967,6 +1009,68 @@ if "conversion_result" in st.session_state:
                 duckdb_mgr.write_profiles_yml()
                 st.caption("ℹ️ profiles.yml restored to DuckDB default after deployment.")
 
+        # --- Push to GitHub ---
+        gh_config = st.session_state.get("github_config")
+        gh_connected = st.session_state.get("github_connected", False)
+
+        if gh_config and gh_connected:
+            st.markdown("")
+            st.markdown("---")
+            st.markdown("### 🐙 Push to GitHub")
+
+            # Let user choose which output to push when LLM result is available
+            has_llm = llm_result and llm_result.get("success") and llm_result.get("sql_content")
+            if has_llm:
+                gh_source = st.radio(
+                    "Push which output?",
+                    ["🔧 Deterministic", "🤖 LLM"],
+                    index=0,
+                    horizontal=True,
+                    help="Choose which generated model to push to GitHub.",
+                    key="gh_source_radio",
+                )
+                gh_result = llm_result if gh_source == "🤖 LLM" else result
+            else:
+                gh_result = result
+
+            push_clicked = st.button(
+                "🚀  Create Pull Request",
+                type="primary",
+                use_container_width=True,
+                help="Create a new branch, commit model files, and open a PR.",
+            )
+
+            if push_clicked:
+                from src.github_connector import GitHubConnector as _GHConn
+
+                model_name = gh_result["model_name"]
+                source_name = gh_result.get("source_name", "unknown")
+                models_path = gh_config.models_path
+
+                # Build files dict
+                files_to_push = {
+                    f"{models_path}/{model_name}.sql": gh_result["sql_content"],
+                    f"{models_path}/{model_name}_schema.yml": gh_result["schema_yaml"],
+                    f"{models_path}/{source_name}_sources.yml": gh_result["source_yaml"],
+                }
+
+                # Gather last validation results if available
+                val_results = st.session_state.get("last_validation_results")
+
+                with st.spinner("Creating branch and PR…"):
+                    connector = _GHConn(gh_config)
+                    pr_result = connector.push_models_and_create_pr(
+                        model_name=model_name,
+                        files=files_to_push,
+                        validation_results=val_results,
+                    )
+
+                if pr_result["success"]:
+                    st.success(f"✅ {pr_result['message']}")
+                    st.markdown(f"🔗 **[Open Pull Request]({pr_result['pr_url']})**")
+                    st.caption(f"Branch: `{pr_result['branch_name']}`")
+                else:
+                    st.error(f"❌ {pr_result['message']}")
 
     else:
         st.markdown(
