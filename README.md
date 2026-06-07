@@ -1,6 +1,26 @@
 # dbt Model Agent
 
-Convert Talend ETL jobs into production-ready dbt models deterministically with optional LLM enhancement. Deploy to **DuckDB** (local), **Snowflake**, or **Databricks**. Check it out: https://talend-to-dbt.streamlit.app/
+Enterprises running Talend face an increasingly expensive choice: maintain legacy ETL infrastructure or migrate to dbt. This tool automates that migration. Convert Talend ETL jobs into production-ready dbt models deterministically with optional LLM enhancement. Deploy to **DuckDB** (local), **Snowflake**, or **Databricks**. Check it out: https://talend-to-dbt.streamlit.app/
+
+![App Demo](docs/demo.gif)
+
+## Why I Built This
+
+I worked on a 4+ PB Snowflake migration where teams were still running Talend jobs. Manual conversion was simply too slow and expensive. This tool is built to solve that exact problem by providing an automated path to modernize legacy ETL pipelines into testable, version-controlled dbt projects.
+
+## Architecture
+
+```mermaid
+graph LR
+    A[Talend XML] --> B[Parser]
+    B --> C{Mode}
+    C -->|Deterministic| D[Converter]
+    C -->|LLM Agent| E[LangGraph Agent]
+    D --> F[SQLFluff Validation]
+    E -->|Self-Correction| F
+    F --> G[dbt compile/run/test]
+    G --> H[(DuckDB / Snowflake / Databricks)]
+```
 
 ## What This Does
 
@@ -120,7 +140,7 @@ dbt-model-agent/
 Pattern-matched conversion. No API key needed. Handles all 6 supported component types reliably.
 
 ### LLM Mode (optional)
-Toggle "Use LLM" in the sidebar. Requires `OPENAI_API_KEY` in a `.env` file. Uses GPT-4o-mini via a LangGraph ReAct agent with self-correction (writes SQL → runs sqlfluff → fixes errors automatically).
+Toggle "Use LLM" in the sidebar. Requires `OPENAI_API_KEY` in a `.env` file. Uses GPT-4o-mini via a LangGraph ReAct agent with self-correction. The agent writes SQL, runs SQLFluff, reads the lint errors, and rewrites — up to 3 iterations — before returning the final model.
 
 ### FastAPI Server (optional)
 For programmatic access:
