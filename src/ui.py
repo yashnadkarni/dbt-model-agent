@@ -645,7 +645,7 @@ with st.sidebar:
 st.markdown("""
 <div class="main-header">
     <h1>🔄 dbt Model Agent</h1>
-    <p>Convert Talend ETL jobs into production-ready dbt models — instantly, deterministically, no LLM required.</p>
+    <p>Convert Talend ETL jobs into production-ready dbt models deterministically and via AI agents.</p>
 </div>
 """, unsafe_allow_html=True)
 
